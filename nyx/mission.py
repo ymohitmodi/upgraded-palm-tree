@@ -56,6 +56,8 @@ class MissionReport:
     budget_exhausted: bool = False
     calls: int = 0
     lessons: int = 0
+    long_term_lessons: int = 0
+    consolidations: int = 0
 
     @property
     def shipped(self) -> int:
@@ -82,7 +84,10 @@ class MissionReport:
             f"{self.genome_score_after} (gain {self.evolution_gain:+})"
         )
         budget = f"calls: {self.calls}" + (" (budget exhausted)" if self.budget_exhausted else "")
-        lines.append(f"Lessons in memory: {self.lessons} | {budget}")
+        lines.append(
+            f"Lessons in memory: {self.lessons} ({self.long_term_lessons} long-term, "
+            f"{self.consolidations} consolidations) | {budget}"
+        )
         lines.append(f"Audit ledger intact: {self.ledger_ok}")
         return "\n".join(lines)
 
@@ -161,9 +166,13 @@ class MissionControl:
         generations: int = 4,
         keep_going: bool = False,
         autonomy: str | None = None,
+        consolidate_every: int | None = None,
     ) -> MissionReport:
         if autonomy:
             self.config.autonomy = autonomy
+        consolidate_every = (
+            consolidate_every if consolidate_every is not None else self.config.consolidate_every
+        )
         report = MissionReport(objective=objective)
         report.genome_score_before = self._adopt_from_archive()
 
@@ -224,13 +233,21 @@ class MissionControl:
                 self._evolve_and_adopt(generations)
                 report.evolutions += 1
 
+            # Periodically "sleep": consolidate short-term lessons into long-term
+            # memory (decay, abstract recurring themes, prune the rest).
+            if consolidate_every and idx % consolidate_every == 0:
+                self._consolidate(report)
+
             # Open-ended productivity: re-plan to keep going when asked.
             if not backlog and keep_going and (max_cycles is None or idx < max_cycles):
                 backlog = self.plan(f"{objective} (continue improving)")
 
+        # A final consolidation pass at the end of the mission.
+        self._consolidate(report)
         report.genome_score_after = self._adopt_from_archive() or report.genome_score_before
         report.calls = self.metrics.calls
         report.lessons = len(self.memory)
+        report.long_term_lessons = self.memory.stats()["long_term"]
         report.ledger_ok = self.ledger.verify()
         self.ledger.append(
             "mission",
@@ -245,6 +262,16 @@ class MissionControl:
             },
         )
         return report
+
+    def _consolidate(self, report: MissionReport) -> None:
+        stats = self.memory.consolidate()
+        report.consolidations += 1
+        self.ledger.append(
+            "memory", "consolidate",
+            rationale=(f"consolidated={stats['consolidated']} promoted={stats['promoted']} "
+                       f"forgotten={stats['forgotten']} long_term={stats['long_term']}"),
+            decision="INFO", data=stats,
+        )
 
     def _evolve_and_adopt(self, generations: int) -> None:
         engine = EvolutionEngine(

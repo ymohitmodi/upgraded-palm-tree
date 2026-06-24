@@ -53,6 +53,49 @@ execute ─▶ REFLECT (distill lessons) ─▶ REMEMBER ─▶ RECALL on next t
 Lessons that recur are **reinforced** (weight rises, deduped); stale ones lose
 weight over time. This keeps memory relevant rather than ever‑growing noise.
 
+## Context management (working memory)
+
+Separate from long-term storage, NYX bounds its **working memory** — the context
+carried forward as an artifact moves stage to stage. Human working memory has
+limited capacity; NYX's is capped at `context_char_budget` (default 4000 chars).
+When the running context exceeds it, [`Factory._compact_context`](../nyx/factory/orchestrator.py)
+keeps the head and tail plus *salient* lines (decisions, gates, signatures,
+requirements, definitions) and elides the rest — a cheap, deterministic,
+offline compaction with no extra model call. Recalled lessons are likewise
+capped (top‑k). So prompts stay bounded no matter how long a mission runs, and
+the call/spend budget (`max_calls`) bounds total cognitive effort.
+
+## Consolidation ("sleep") — forming long-term memory
+
+This is the human‑brain analogy made literal. The hippocampus records episodes
+quickly; during sleep they are **consolidated** into the neocortex as
+generalized knowledge, while unused traces fade. NYX runs the same pass
+periodically — every `consolidate_every` cycles during a mission, on mission
+end, or on demand (`nyx memory --consolidate`).
+[`MemoryStore.consolidate()`](../nyx/memory.py) does four things:
+
+1. **Decay** — short‑term lessons lose weight by recency on an Ebbinghaus
+   forgetting curve (`weight *= 0.5 ** (age / half_life)`).
+2. **Abstract** — when several short‑term lessons share a theme (a non‑generic
+   tag), they are collapsed into one stronger **long‑term `principle`**
+   (*"[billing] recurring across 5 runs — …"*). Many specific episodes → one
+   general rule.
+3. **Promote** — lessons applied often enough (`uses ≥ promote_uses`) graduate
+   straight to long‑term.
+4. **Forget** — short‑term lessons whose weight has decayed below a floor are
+   pruned.
+
+Long‑term memories **don't decay** and are **preferred at recall** (a relevance
+boost), so proven, general knowledge outcompetes one‑off notes over time. Each
+pass is written to the ledger (`memory/consolidate`), so the formation of
+long‑term memory is itself auditable.
+
+```
+short-term lessons ──(decay + abstract + promote)──▶ long-term principles
+        │                                                   │
+        └────────────────── forget faded ──────────────────┘   (the "sleep" pass)
+```
+
 ## How the three reinforce each other
 
 ```
@@ -79,9 +122,10 @@ audit trail of how it all happened (episodic).
 
 ```bash
 nyx run "Launch a billing platform"     # builds, reflects, evolves, remembers
-nyx memory                              # list learned lessons (by weight)
+nyx memory                              # list lessons (LT = consolidated long-term)
 nyx memory --recall "invoice exports"   # what would be applied to a new task
-nyx ledger --tail 30                    # the episodic record (incl. recall/reflect events)
+nyx memory --consolidate                # run a "sleep" pass on demand
+nyx ledger --tail 30                    # the episodic record (recall/reflect/consolidate)
 nyx evolve --suite swebench -g 10       # grow procedural memory against real tests
 ```
 

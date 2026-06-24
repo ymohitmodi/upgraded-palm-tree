@@ -143,6 +143,10 @@ def cmd_memory(args) -> int:
 
     cfg = load_config()
     store = MemoryStore(cfg.memory_path)
+    if args.consolidate:
+        stats = store.consolidate()
+        print(f"Consolidation ('sleep') complete: {stats}")
+        return 0
     if args.recall:
         lessons = store.recall(args.recall, k=args.tail)
         print(f"Lessons relevant to {args.recall!r}:")
@@ -150,7 +154,8 @@ def cmd_memory(args) -> int:
         lessons = store.all()[: args.tail]
         print(f"Memory: {len(store)} lessons (showing {min(args.tail, len(store))}):")
     for ln in lessons:
-        print(f"  [{ln.kind:9s} w={ln.weight:>4} uses={ln.uses}] {ln.text[:90]}")
+        tier = "LT" if ln.tier == "long_term" else "st"
+        print(f"  [{tier} {ln.kind:9s} w={ln.weight:>5} uses={ln.uses}] {ln.text[:88]}")
     if not lessons:
         print("  (none yet — run 'nyx run' or 'nyx build' to accumulate lessons)")
     return 0
@@ -284,6 +289,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     m = sub.add_parser("memory", help="inspect or query learned lessons")
     m.add_argument("--recall", help="query memory for lessons relevant to this text")
+    m.add_argument("--consolidate", action="store_true",
+                   help="run a consolidation 'sleep' pass (decay, abstract, prune)")
     m.add_argument("--tail", type=int, default=20)
     m.set_defaults(func=cmd_memory)
 

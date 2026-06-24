@@ -117,6 +117,27 @@ class Factory:
         agent.lessons = self._recalled  # apply what we've learned
         return agent
 
+    def _compact_context(self, text: str) -> str:
+        """Bound the working context carried between stages (short-term memory).
+
+        Like human working memory, capacity is limited: when the running context
+        exceeds the budget, keep the head and tail plus salient lines (decisions,
+        gates, signatures, requirements) and elide the rest. Cheap, deterministic,
+        and offline — no extra model call.
+        """
+        budget = self.config.context_char_budget
+        if budget <= 0 or len(text) <= budget:
+            return text
+        lines = text.splitlines()
+        salient_kw = ("must", "gate", "block", "valid", "def ", "class ", "error",
+                      "security", "requirement", "accept", "test")
+        salient = [ln for ln in lines if any(k in ln.lower() for k in salient_kw)]
+        head = text[: budget // 2]
+        tail = text[-budget // 4:]
+        keep = "\n".join(salient)[: budget // 4]
+        compacted = f"{head}\n…[context compacted]…\n{keep}\n…\n{tail}"
+        return compacted[: budget + 200]
+
     # -- run -----------------------------------------------------------------
     def build(self, intent: str, approver: Approver | None = None) -> FactoryResult:
         """Run the full pipeline for a feature/product intent."""
@@ -193,8 +214,8 @@ class Factory:
 
             result.findings.extend(primary.findings)
 
-            # Carry the winning artifact forward as context for the next stage.
-            context = primary.text
+            # Carry the winning artifact forward as bounded working memory.
+            context = self._compact_context(primary.text)
 
             if not verdict.passed and self.constitution.mode == "block":
                 result.blocked_at = stage

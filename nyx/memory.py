@@ -45,12 +45,14 @@ def _tokens(text: str) -> set[str]:
 class Lesson:
     id: str
     text: str
-    kind: str = "lesson"          # lesson | pattern | preference | risk
+    kind: str = "lesson"          # lesson | pattern | preference | risk | principle
     tags: list[str] = field(default_factory=list)
     source: str = ""
     weight: float = 1.0           # reinforced when re-learned, decays when stale
     uses: int = 0                 # times recalled/applied
-    ts: float = field(default_factory=time.time)
+    tier: str = "short_term"      # short_term -> consolidated into long_term
+    ts: float = field(default_factory=time.time)        # first learned
+    last_used: float = field(default_factory=time.time)  # last reinforced/recalled
 
     def tokenset(self) -> set[str]:
         return _tokens(self.text) | {t.lower() for t in self.tags}
@@ -99,7 +101,7 @@ class MemoryStore:
         existing = self.lessons.get(lid)
         if existing:
             existing.weight = round(existing.weight + weight * 0.5, 3)
-            existing.ts = time.time()
+            existing.last_used = time.time()
             if tags:
                 existing.tags = sorted(set(existing.tags) | set(tags))
         else:
@@ -121,13 +123,17 @@ class MemoryStore:
             overlap = q & lesson.tokenset()
             if not overlap:
                 continue
-            # Jaccard-ish relevance, boosted by reinforcement weight.
+            # Jaccard-ish relevance, boosted by reinforcement weight, with a
+            # preference for consolidated long-term memories (more general/proven).
             rel = len(overlap) / len(q | lesson.tokenset())
-            scored.append((rel * lesson.weight, lesson))
+            tier_boost = 1.5 if lesson.tier == "long_term" else 1.0
+            scored.append((rel * lesson.weight * tier_boost, lesson))
         scored.sort(key=lambda x: x[0], reverse=True)
         top = [lesson for _, lesson in scored[:k]]
+        now = time.time()
         for lesson in top:
             lesson.uses += 1
+            lesson.last_used = now
         if top:
             self._flush()
         return top
@@ -137,6 +143,90 @@ class MemoryStore:
 
     def all(self) -> list[Lesson]:
         return sorted(self.lessons.values(), key=lambda x: x.weight, reverse=True)
+
+    def stats(self) -> dict:
+        long_term = sum(1 for x in self.lessons.values() if x.tier == "long_term")
+        return {"total": len(self.lessons), "long_term": long_term,
+                "short_term": len(self.lessons) - long_term}
+
+    # -- consolidation ("sleep"): form long-term memory ---------------------
+    _GENERIC_TAGS = {"core", "flow", "page", "data", "model", "errors"}
+
+    def consolidate(
+        self,
+        *,
+        now: float | None = None,
+        half_life_days: float = 7.0,
+        min_weight: float = 0.2,
+        cluster_min: int = 3,
+        promote_uses: int = 3,
+    ) -> dict:
+        """A brain-like consolidation pass — run periodically, like sleep.
+
+        1. DECAY    short-term lessons by recency (Ebbinghaus forgetting curve).
+        2. ABSTRACT recurring short-term lessons that share a theme (tag) into a
+           single, stronger LONG-TERM principle (hippocampus → neocortex).
+        3. PROMOTE  frequently-applied lessons straight to long-term.
+        4. FORGET   short-term lessons whose weight has decayed below the floor.
+
+        Long-term memories don't decay and are preferred at recall time.
+        """
+        now = now or time.time()
+        decayed = promoted = consolidated = forgotten = 0
+
+        # 1. Decay short-term memories by how long since they were last used.
+        for lesson in self.lessons.values():
+            if lesson.tier == "long_term":
+                continue
+            age_days = max(0.0, (now - lesson.last_used) / 86400.0)
+            if age_days > 0:
+                lesson.weight = round(lesson.weight * (0.5 ** (age_days / half_life_days)), 4)
+                decayed += 1
+
+        # 2. Abstract recurring themes (shared, non-generic tag) into principles.
+        theme_members: dict[str, list[Lesson]] = {}
+        for lesson in self.lessons.values():
+            if lesson.tier == "long_term":
+                continue
+            for tag in lesson.tags:
+                t = tag.lower()
+                if t in self._GENERIC_TAGS or t in _STOPWORDS:
+                    continue
+                theme_members.setdefault(t, []).append(lesson)
+
+        for theme, members in theme_members.items():
+            if len(members) < cluster_min:
+                continue
+            members.sort(key=lambda x: x.weight, reverse=True)
+            representative = members[0].text
+            text = f"[{theme}] recurring across {len(members)} runs — {representative}"
+            lid = _lesson_id(text, "principle")
+            self.lessons[lid] = Lesson(
+                id=lid, text=text, kind="principle", tags=[theme],
+                source="consolidation", tier="long_term",
+                weight=round(sum(m.weight for m in members), 3),
+                uses=sum(m.uses for m in members), last_used=now,
+            )
+            consolidated += 1
+            # The specifics are absorbed into the principle; drop them.
+            for m in members:
+                self.lessons.pop(m.id, None)
+
+        # 3. Promote heavily-used short-term lessons to long-term.
+        for lesson in self.lessons.values():
+            if lesson.tier != "long_term" and lesson.uses >= promote_uses:
+                lesson.tier = "long_term"
+                promoted += 1
+
+        # 4. Forget faded short-term memories.
+        for lid in [x.id for x in self.lessons.values()
+                    if x.tier != "long_term" and x.weight < min_weight]:
+            self.lessons.pop(lid, None)
+            forgotten += 1
+
+        self._flush()
+        return {"decayed": decayed, "consolidated": consolidated,
+                "promoted": promoted, "forgotten": forgotten, **self.stats()}
 
 
 def reflect_on_run(result, store: MemoryStore) -> list[Lesson]:

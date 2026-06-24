@@ -130,8 +130,14 @@ execute → REFLECT → REMEMBER → RECALL next time → better execution
          ↘ EVOLVE (better agents, adopted back in) ↗
 ```
 
+It also works like a brain in two more ways: **working memory** is bounded
+(context is compacted between stages, prompts stay within a budget), and a
+periodic **consolidation "sleep" pass** decays unused lessons, abstracts
+recurring ones into stable long‑term *principles*, and forgets the rest — so
+proven, general knowledge outcompetes one‑off notes over time.
+
 No vector DB, no retraining — it runs offline on the mini‑PC. `nyx memory`
-shows what it has learned.
+shows what it has learned; `nyx memory --consolidate` runs a sleep pass.
 
 No API key? NYX runs in **deterministic mock mode** so you can explore the whole
 factory offline. Add an Ollama key to `.env` to switch the brain on.
