@@ -1,0 +1,220 @@
+"""NYX command-line interface — the operator's console for the dark factory.
+
+    nyx build "<intent>"   run the full SDLC pipeline for a feature/product
+    nyx evolve [-g N]      run N generations of agent self-improvement
+    nyx doctor             verify config, constitution, brain, and ledger
+    nyx constitution       print the loaded constitution
+    nyx ledger [--tail N]  show the audit trail (and verify the hash chain)
+    nyx status             show recent factory runs
+    nyx serve              lights-out: drain a backlog.txt of intents
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+from . import __version__
+from .config import load_config
+from .constitution import Constitution
+from .factory.orchestrator import Factory
+from .observability.ledger import AuditLedger
+
+
+def _banner(cfg) -> str:
+    brain = "MOCK (offline)" if cfg.mock_mode else f"Ollama Cloud @ {cfg.ollama_host}"
+    return (
+        f"NYX v{__version__} — autonomous dark factory\n"
+        f"  brain     : {brain}\n"
+        f"  autonomy  : {cfg.autonomy}\n"
+        f"  fanout    : {cfg.fanout}\n"
+        f"  constitution mode: {cfg.constitution_mode}"
+    )
+
+
+def cmd_build(args) -> int:
+    cfg = load_config()
+    if args.autonomy:
+        cfg.autonomy = args.autonomy
+    if args.fanout:
+        cfg.fanout = args.fanout
+    print(_banner(cfg) + "\n")
+    factory = Factory(config=cfg)
+
+    def approver(stage: str, summary: str) -> bool:
+        if args.yes:
+            return True
+        if not sys.stdin.isatty():
+            return False
+        ans = input(f"\nApprove {stage}? [y/N] ").strip().lower()
+        return ans in ("y", "yes")
+
+    result = factory.build(args.intent, approver=approver)
+    print("\n" + result.summary())
+    print("\nMetrics:", result.metrics)
+    print("Ledger intact:", result.ledger_ok)
+    if args.show:
+        for s in result.stages:
+            print(f"\n===== {s.stage.upper()} =====\n{s.artifact}")
+    return 0 if (result.shipped or result.held_for_approval) else 1
+
+
+def cmd_evolve(args) -> int:
+    from .evolution.engine import EvolutionEngine
+
+    cfg = load_config()
+    print(_banner(cfg) + "\n")
+    engine = EvolutionEngine(config=cfg, role=args.role)
+    report = engine.evolve(generations=args.generations)
+    print(
+        f"Evolution complete over {report.generations} generations:\n"
+        f"  admitted     : {report.admitted}\n"
+        f"  rejected     : {report.rejected}\n"
+        f"  archive size : {report.archive_size}\n"
+        f"  best before  : {report.best_score_before}\n"
+        f"  best after   : {report.best_score_after}\n"
+        f"  net gain     : {report.gain}"
+    )
+    return 0
+
+
+def cmd_doctor(args) -> int:
+    cfg = load_config()
+    print(_banner(cfg) + "\n")
+    ok = True
+
+    # Constitution
+    try:
+        const = Constitution.load(cfg.constitution_path, mode=cfg.constitution_mode)
+        print(f"✓ constitution: {len(const.principles)} principles, "
+              f"{len(const.gates)} gates, {len(const.forbidden)} forbidden")
+    except Exception as exc:  # noqa: BLE001
+        print(f"✗ constitution failed to load: {exc}")
+        ok = False
+
+    # Ledger
+    try:
+        ledger = AuditLedger(cfg.ledger_path)
+        print(f"✓ ledger: {ledger._seq} entries, chain intact={ledger.verify()}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"✗ ledger error: {exc}")
+        ok = False
+
+    # Brain
+    if cfg.mock_mode:
+        print("• brain: MOCK mode (no OLLAMA_API_KEY). Set it in .env to go live.")
+    else:
+        print(f"• brain: Ollama Cloud configured ({cfg.model('coder')}). "
+              "Run 'nyx build' to exercise it.")
+
+    print("\nDoctor:", "healthy ✓" if ok else "issues found ✗")
+    return 0 if ok else 1
+
+
+def cmd_constitution(args) -> int:
+    cfg = load_config()
+    const = Constitution.load(cfg.constitution_path, mode=cfg.constitution_mode)
+    print(f"# {const.meta.get('name')} v{const.meta.get('version')}\n")
+    for p in const.principles.values():
+        lock = " [immutable]" if p.immutable else ""
+        print(f"[{p.id}] ({p.section}) {p.title}{lock}")
+    print("\nGates:")
+    for g in const.gates.values():
+        print(f"  {g.id} @ {g.stage}: requires {', '.join(g.requires)}")
+    print("\nForbidden:")
+    for f in const.forbidden:
+        print(f"  - {f}")
+    return 0
+
+
+def cmd_ledger(args) -> int:
+    cfg = load_config()
+    ledger = AuditLedger(cfg.ledger_path)
+    entries = ledger.tail(args.tail)
+    for e in entries:
+        print(f"#{e.seq:04d} [{e.decision:5s}] {e.actor:18s} {e.action:22s} {e.rationale[:80]}")
+    if args.verify:
+        print("\nChain intact:", ledger.verify())
+    if not entries:
+        print("(ledger empty — run 'nyx build' first)")
+    return 0
+
+
+def cmd_status(args) -> int:
+    cfg = load_config()
+    ledger = AuditLedger(cfg.ledger_path)
+    runs = [e for e in ledger.read() if e.action in ("run_start", "run_end")]
+    if not runs:
+        print("No runs yet.")
+        return 0
+    for e in runs[-args.tail * 2:]:
+        print(f"#{e.seq:04d} {e.action:10s} {e.rationale[:100]}")
+    return 0
+
+
+def cmd_serve(args) -> int:
+    """Lights-out: drain a backlog of intents (one per line)."""
+    cfg = load_config()
+    print(_banner(cfg) + "\n")
+    backlog = Path(args.backlog)
+    if not backlog.exists():
+        print(f"No backlog at {backlog}. Create it with one intent per line.")
+        return 1
+    factory = Factory(config=cfg)
+    intents = [ln.strip() for ln in backlog.read_text().splitlines() if ln.strip() and not ln.startswith("#")]
+    for intent in intents:
+        print(f"\n▶ {intent}")
+        result = factory.build(intent, approver=lambda *_: cfg.autonomy == "autonomous")
+        print(result.summary())
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="nyx", description="NYX — autonomous dark factory")
+    p.add_argument("--version", action="version", version=f"nyx {__version__}")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    b = sub.add_parser("build", help="run the full SDLC pipeline for an intent")
+    b.add_argument("intent", help="what to build, in plain language")
+    b.add_argument("--autonomy", choices=["assisted", "supervised", "autonomous"])
+    b.add_argument("--fanout", type=int, help="agents per stage")
+    b.add_argument("--yes", action="store_true", help="auto-approve gated deploys")
+    b.add_argument("--show", action="store_true", help="print every stage artifact")
+    b.set_defaults(func=cmd_build)
+
+    e = sub.add_parser("evolve", help="run agent self-improvement")
+    e.add_argument("-g", "--generations", type=int, default=5)
+    e.add_argument("--role", default="coder")
+    e.set_defaults(func=cmd_evolve)
+
+    d = sub.add_parser("doctor", help="verify configuration and health")
+    d.set_defaults(func=cmd_doctor)
+
+    c = sub.add_parser("constitution", help="print the loaded constitution")
+    c.set_defaults(func=cmd_constitution)
+
+    lg = sub.add_parser("ledger", help="show the audit trail")
+    lg.add_argument("--tail", type=int, default=20)
+    lg.add_argument("--verify", action="store_true")
+    lg.set_defaults(func=cmd_ledger)
+
+    st = sub.add_parser("status", help="show recent factory runs")
+    st.add_argument("--tail", type=int, default=5)
+    st.set_defaults(func=cmd_status)
+
+    sv = sub.add_parser("serve", help="lights-out: drain backlog.txt")
+    sv.add_argument("--backlog", default="backlog.txt")
+    sv.set_defaults(func=cmd_serve)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
