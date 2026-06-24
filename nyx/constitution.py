@@ -134,6 +134,10 @@ class Constitution:
             "disable or bypass the audit ledger": [r"(disable|skip|bypass).*(ledger|audit)"],
             "remove or weaken an immutable": [r"(remove|delete|weaken).*(immutable|core principle)"],
             "fabricated results": [r"(fake|fabricat|pretend).*(test|result|pass)"],
+            "guarantee investment returns": [
+                r"\b(guarantee[d]?|risk[\s-]?free|no risk)\b.*\b(return|profit|gain|money)\b"],
+            "fabricate financial figures": [
+                r"(made[\s-]?up|fabricat|invent).*(number|figure|financial)"],
         }
         for item in self.forbidden:
             key = next((k for k in signals if k in item.lower()), None)

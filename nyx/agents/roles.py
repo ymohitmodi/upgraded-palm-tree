@@ -93,6 +93,18 @@ class SecurityAgent(Agent):
     )
 
 
+class AnalystAgent(Agent):
+    default_model_role = "architect"
+    charter = (
+        "You are the Value Analyst. Find deeply undervalued public companies and "
+        "protect against permanent capital loss. Demand a margin of safety vs a "
+        "conservative intrinsic value; favor high ROIC and durable moats with low "
+        "debt; think in owner-earnings, not accounting EPS; read the footnotes. "
+        "Every number must be sourced from filings — never invent figures, never "
+        "guarantee returns. Rank candidates and explain each like a Buffett memo."
+    )
+
+
 ROLE_REGISTRY: dict[str, type[Agent]] = {
     "planner": PlannerAgent,
     "explorer": ExplorerAgent,
@@ -103,6 +115,7 @@ ROLE_REGISTRY: dict[str, type[Agent]] = {
     "deployer": DeployerAgent,
     "operator": OperatorAgent,
     "security": SecurityAgent,
+    "analyst": AnalystAgent,
 }
 
 

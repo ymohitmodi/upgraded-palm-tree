@@ -87,6 +87,10 @@ def _benchmark_for(suite: str):
         from .evolution.benchmarks import default_swebench_suite
 
         return default_swebench_suite()
+    if suite == "value":
+        from .domains.investing import ValueBenchmark
+
+        return ValueBenchmark()
     return None  # engine falls back to its reference benchmark
 
 
@@ -95,8 +99,17 @@ def cmd_evolve(args) -> int:
 
     cfg = load_config()
     print(_banner(cfg) + "\n")
-    engine = EvolutionEngine(config=cfg, role=args.role, benchmark=_benchmark_for(args.suite))
-    print(f"benchmark: {args.suite}\n")
+    role = args.role
+    directives = None
+    if args.suite == "value":
+        from .domains.investing import INVESTING_DIRECTIVES
+
+        directives = INVESTING_DIRECTIVES
+        if role == "coder":  # default → use the analyst for the value suite
+            role = "analyst"
+    engine = EvolutionEngine(config=cfg, role=role, benchmark=_benchmark_for(args.suite),
+                             directive_pool=directives)
+    print(f"benchmark: {args.suite} | role: {role}\n")
     report = engine.evolve(generations=args.generations)
     print(
         f"Evolution complete over {report.generations} generations:\n"
@@ -158,6 +171,30 @@ def cmd_memory(args) -> int:
         print(f"  [{tier} {ln.kind:9s} w={ln.weight:>5} uses={ln.uses}] {ln.text[:88]}")
     if not lessons:
         print("  (none yet — run 'nyx run' or 'nyx build' to accumulate lessons)")
+    return 0
+
+
+def cmd_backtest(args) -> int:
+    """Backtest the current/evolved analyst genome on the value universe."""
+    from .domains.investing import ValueBenchmark
+    from .domains.investing.gates import check_investing
+    from .evolution.archive import Archive
+
+    cfg = load_config()
+    print(_banner(cfg) + "\n")
+    best = Archive(cfg.evolution_archive).best_for("analyst")
+    genome = best.to_genome() if best else None
+    bench = ValueBenchmark()
+    res = bench.evaluate(genome)
+    label = "evolved" if best else "baseline (run `nyx evolve --suite value` to improve)"
+    print(f"Analyst genome: {label}")
+    print(f"  picks           : {', '.join(res.picks)}")
+    print(f"  portfolio return: {res.portfolio_return:+.2%}")
+    print(f"  downside        : {res.downside:+.2%}")
+    print(f"  risk-adj score  : {res.score:+.4f}  (return penalized for capital loss)")
+    # Demonstrate the investing gates on a couple of memos.
+    bad = "Buy SYN01 now — guaranteed 30% risk-free return."
+    print(f"\nGate check (bad memo): {check_investing(bad)}")
     return 0
 
 
@@ -317,8 +354,8 @@ def build_parser() -> argparse.ArgumentParser:
     e = sub.add_parser("evolve", help="run agent self-improvement")
     e.add_argument("-g", "--generations", type=int, default=5)
     e.add_argument("--role", default="coder")
-    e.add_argument("--suite", choices=["reference", "swebench"], default="reference",
-                   help="fitness benchmark (swebench runs generated code in the sandbox)")
+    e.add_argument("--suite", choices=["reference", "swebench", "value"], default="reference",
+                   help="fitness benchmark (swebench=run code in sandbox; value=value backtest)")
     e.set_defaults(func=cmd_evolve)
 
     bn = sub.add_parser("bench", help="run the SWE-bench-style suite against the coder agent")
@@ -331,6 +368,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="run a consolidation 'sleep' pass (decay, abstract, prune)")
     m.add_argument("--tail", type=int, default=20)
     m.set_defaults(func=cmd_memory)
+
+    bt = sub.add_parser("backtest", help="backtest the analyst genome (value suite)")
+    bt.set_defaults(func=cmd_backtest)
 
     tl = sub.add_parser("tools", help="list available tools / MCP servers")
     tl.set_defaults(func=cmd_tools)

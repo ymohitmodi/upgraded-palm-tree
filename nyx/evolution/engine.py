@@ -68,6 +68,7 @@ class EvolutionEngine:
         benchmark: Benchmark | None = None,
         seed: int = 1234,
         metrics: Metrics | None = None,
+        directive_pool: list[str] | None = None,
     ):
         self.config = config or load_config()
         self.provider = provider or build_provider(self.config)
@@ -79,6 +80,8 @@ class EvolutionEngine:
         self.ledger = ledger or AuditLedger(self.config.ledger_path)
         self.role = role
         self.benchmark = benchmark or self._default_benchmark
+        # The pool of charter directives mutation can graft on (domain-tunable).
+        self.directive_pool = directive_pool or _DIRECTIVE_POOL
         self.rng = random.Random(seed)
         # Shared metrics let a caller (e.g. a mission) account benchmark calls
         # against one budget; otherwise the engine keeps its own counter.
@@ -113,7 +116,7 @@ class EvolutionEngine:
             choices = ["coder", "architect", "reviewer", "fast"]
             child = genome.mutate(model_role=self.rng.choice(choices))
         else:  # directive: append an improvement to the charter
-            directive = self.rng.choice(_DIRECTIVE_POOL)
+            directive = self.rng.choice(self.directive_pool)
             sep = "" if genome.system_prompt.endswith("\n") else "\n"
             child = genome.mutate(system_prompt=genome.system_prompt + sep + directive)
         child.lineage = list(genome.lineage) + [_genome_id(genome)]

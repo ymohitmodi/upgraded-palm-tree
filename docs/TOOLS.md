@@ -91,6 +91,43 @@ nyx memory --recall "durable moat with high ROIC"    # confirm it's in long-term
 `principle` lessons, so the analyst starts Buffett-shaped; `--fetch` adds sourced
 excerpts from the actual shareholder letters when the network allows it.
 
+## The fitness signal: a point-in-time value backtest
+
+`nyx/domains/investing/backtest.py` is what makes "keep evolving to get better at
+value investing" *measurable*. `ValueBenchmark` plugs straight into the
+Darwin-Gödel engine:
+
+```bash
+nyx evolve --suite value -g 30     # evolve the `analyst` genome vs the backtest
+nyx backtest                       # show the evolved analyst's picks + risk-adj return
+```
+
+How it stays honest:
+
+- **No look-ahead** — the genome only influences *which value factors it weighs*
+  (margin of safety, ROIC, leverage, owner-earnings), computed from data known as
+  of T. Forward returns are hidden and used only to score the picks.
+- **Walk-forward** — it averages over several independent universes, so fitness
+  rewards a *robust* doctrine, not a fit to one period's noise (the classic
+  backtest trap).
+- **Capital preservation priced in** — score = forward return with a heavy
+  penalty on downside, matching the constitution's "don't lose money" gate.
+- **The doctrine must actually work** — in the data, sound value factors really do
+  predict returns, so a genome encoding the Buffett doctrine backtests better and
+  evolution discovers that. (Demo: a doctrine analyst returns ~+25% with zero
+  downside vs negative for a no-doctrine genome.)
+
+Swap `default_universes()` for real EDGAR fundamentals + realized forward prices
+and the exact same mechanics become a real walk-forward backtest.
+
+### Investing constitution gates
+
+`nyx/domains/investing/gates.py` adds three values an autonomous allocator must
+not break: **no guaranteed returns**, **no un-sourced numbers** (every figure
+must trace to a filing — defeats hallucinated numbers), and **margin of safety
+required** on any buy thesis. Use `investing_constitution()` to run the factory
+with these enforced, or `check_investing(text)` anywhere.
+
 ## Scraping etiquette (built in)
 
 Declares a `User-Agent`, rate-limits per host (`web_rate_limit_seconds`), honors
