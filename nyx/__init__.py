@@ -12,6 +12,7 @@ __version__ = "0.1.0"
 from .config import Config, load_config
 from .constitution import Constitution
 from .factory.orchestrator import Factory, FactoryResult
+from .memory import MemoryStore, reflect_on_run
 from .mission import MissionControl, MissionReport
 
 __all__ = [
@@ -23,4 +24,6 @@ __all__ = [
     "FactoryResult",
     "MissionControl",
     "MissionReport",
+    "MemoryStore",
+    "reflect_on_run",
 ]

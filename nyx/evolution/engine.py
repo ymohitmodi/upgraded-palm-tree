@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import random
-import time
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -68,6 +67,7 @@ class EvolutionEngine:
         role: str = "coder",
         benchmark: Benchmark | None = None,
         seed: int = 1234,
+        metrics: Metrics | None = None,
     ):
         self.config = config or load_config()
         self.provider = provider or build_provider(self.config)
@@ -80,7 +80,9 @@ class EvolutionEngine:
         self.role = role
         self.benchmark = benchmark or self._default_benchmark
         self.rng = random.Random(seed)
-        self.metrics = Metrics()
+        # Shared metrics let a caller (e.g. a mission) account benchmark calls
+        # against one budget; otherwise the engine keeps its own counter.
+        self.metrics = metrics if metrics is not None else Metrics()
 
     # -- agent construction --------------------------------------------------
     def _agent_for(self, genome: Genome) -> Agent:
@@ -168,8 +170,9 @@ class EvolutionEngine:
 
     # -- evolution loop ------------------------------------------------------
     def evolve(self, generations: int = 5) -> EvolutionReport:
-        # Seed the archive with the baseline genome if empty.
-        if len(self.archive) == 0:
+        # Seed when *this role* has no genome yet (not merely when the whole
+        # archive is empty), so evolving a new role on a shared archive works.
+        if self.archive.best_for(self.role) is None:
             seed_genome = self._seed_genome()
             score = self.benchmark(self._agent_for(seed_genome))
             rec = GenomeRecord(
@@ -181,13 +184,16 @@ class EvolutionEngine:
                 note="seed",
             )
             self.archive.add(rec)
-            self.ledger.append("evolution", "seed_archive", rationale=f"score={score}", decision="INFO")
+            self.ledger.append(
+                "evolution", "seed_archive", rationale=f"role={self.role} score={score}", decision="INFO"
+            )
 
-        before = self.archive.best().score
+        before = self.archive.best_for(self.role).score
         admitted = rejected = 0
 
         for gen in range(1, generations + 1):
-            parent = self.archive.select_parent(self.rng)
+            # Role-scoped selection: only mutate this role's lineage.
+            parent = self.archive.select_parent(self.rng, role=self.role)
             child_genome = self.mutate(parent.to_genome())
 
             if not self._constitutional(child_genome):
@@ -227,7 +233,7 @@ class EvolutionEngine:
                     decision="INFO",
                 )
 
-        best = self.archive.best()
+        best = self.archive.best_for(self.role)
         return EvolutionReport(
             generations=generations,
             admitted=admitted,

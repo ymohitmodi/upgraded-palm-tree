@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -83,12 +82,21 @@ def cmd_run(args) -> int:
     return 0
 
 
+def _benchmark_for(suite: str):
+    if suite == "swebench":
+        from .evolution.benchmarks import default_swebench_suite
+
+        return default_swebench_suite()
+    return None  # engine falls back to its reference benchmark
+
+
 def cmd_evolve(args) -> int:
     from .evolution.engine import EvolutionEngine
 
     cfg = load_config()
     print(_banner(cfg) + "\n")
-    engine = EvolutionEngine(config=cfg, role=args.role)
+    engine = EvolutionEngine(config=cfg, role=args.role, benchmark=_benchmark_for(args.suite))
+    print(f"benchmark: {args.suite}\n")
     report = engine.evolve(generations=args.generations)
     print(
         f"Evolution complete over {report.generations} generations:\n"
@@ -99,6 +107,52 @@ def cmd_evolve(args) -> int:
         f"  best after   : {report.best_score_after}\n"
         f"  net gain     : {report.gain}"
     )
+    return 0
+
+
+def cmd_bench(args) -> int:
+    """Run the SWE-bench-style suite against the current coder agent."""
+    from .constitution import Constitution
+    from .evolution.archive import Archive
+    from .evolution.benchmarks import default_swebench_suite
+    from .agents.roles import build_agent
+    from .observability.metrics import Metrics
+    from .providers import build_provider
+
+    cfg = load_config()
+    print(_banner(cfg) + "\n")
+    const = Constitution.load(cfg.constitution_path, mode=cfg.constitution_mode)
+    provider = build_provider(cfg)
+    # Use the best evolved coder genome if one exists, else the production default.
+    best = Archive(cfg.evolution_archive).best_for(args.role)
+    genome = best.to_genome() if best else None
+    agent = build_agent(args.role, cfg, provider, const, metrics=Metrics(), genome=genome)
+
+    suite = default_swebench_suite()
+    result = suite.evaluate(agent)
+    for r in result.results:
+        mark = "✓" if r.passed else "✗"
+        print(f"  {mark} {r.id:16s} {('' if r.passed else r.detail)[:60]}")
+    print(f"\nSWE-bench score: {result.score:.0%}  ({'evolved' if best else 'default'} genome)")
+    return 0
+
+
+def cmd_memory(args) -> int:
+    """Inspect or query the factory's semantic memory (learned lessons)."""
+    from .memory import MemoryStore
+
+    cfg = load_config()
+    store = MemoryStore(cfg.memory_path)
+    if args.recall:
+        lessons = store.recall(args.recall, k=args.tail)
+        print(f"Lessons relevant to {args.recall!r}:")
+    else:
+        lessons = store.all()[: args.tail]
+        print(f"Memory: {len(store)} lessons (showing {min(args.tail, len(store))}):")
+    for ln in lessons:
+        print(f"  [{ln.kind:9s} w={ln.weight:>4} uses={ln.uses}] {ln.text[:90]}")
+    if not lessons:
+        print("  (none yet — run 'nyx run' or 'nyx build' to accumulate lessons)")
     return 0
 
 
@@ -220,7 +274,18 @@ def build_parser() -> argparse.ArgumentParser:
     e = sub.add_parser("evolve", help="run agent self-improvement")
     e.add_argument("-g", "--generations", type=int, default=5)
     e.add_argument("--role", default="coder")
+    e.add_argument("--suite", choices=["reference", "swebench"], default="reference",
+                   help="fitness benchmark (swebench runs generated code in the sandbox)")
     e.set_defaults(func=cmd_evolve)
+
+    bn = sub.add_parser("bench", help="run the SWE-bench-style suite against the coder agent")
+    bn.add_argument("--role", default="coder")
+    bn.set_defaults(func=cmd_bench)
+
+    m = sub.add_parser("memory", help="inspect or query learned lessons")
+    m.add_argument("--recall", help="query memory for lessons relevant to this text")
+    m.add_argument("--tail", type=int, default=20)
+    m.set_defaults(func=cmd_memory)
 
     d = sub.add_parser("doctor", help="verify configuration and health")
     d.set_defaults(func=cmd_doctor)

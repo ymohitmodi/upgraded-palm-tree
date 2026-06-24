@@ -43,6 +43,8 @@ class FactoryResult:
     held_for_approval: bool = False
     metrics: dict = field(default_factory=dict)
     ledger_ok: bool = True
+    findings: list[str] = field(default_factory=list)
+    lessons_applied: int = 0
 
     def artifact(self, stage: str) -> str | None:
         for s in self.stages:
@@ -85,6 +87,7 @@ class Factory:
         ledger: AuditLedger | None = None,
         metrics: Metrics | None = None,
         genomes: dict | None = None,
+        memory=None,
     ):
         self.config = config or load_config()
         self.provider = provider or build_provider(self.config)
@@ -96,10 +99,13 @@ class Factory:
         # Evolved genomes adopted per role (from the evolution archive). When a
         # role has an adopted genome, agents run with that improved DNA.
         self.genomes: dict = genomes or {}
+        # Semantic memory (lessons). Recalled per build and reflected on after.
+        self.memory = memory
+        self._recalled: list[str] = []
 
     # -- agent factory -------------------------------------------------------
     def _agent(self, role: str) -> Agent:
-        return build_agent(
+        agent = build_agent(
             role,
             self.config,
             self.provider,
@@ -108,6 +114,8 @@ class Factory:
             metrics=self.metrics,
             genome=self.genomes.get(role),
         )
+        agent.lessons = self._recalled  # apply what we've learned
+        return agent
 
     # -- run -----------------------------------------------------------------
     def build(self, intent: str, approver: Approver | None = None) -> FactoryResult:
@@ -116,6 +124,17 @@ class Factory:
         result = FactoryResult(intent=intent)
         claims: dict[str, bool] = {}
         context = ""
+
+        # Recall relevant lessons from semantic memory and apply them this run.
+        if self.memory is not None:
+            self._recalled = [lesson.text for lesson in self.memory.recall(intent, k=5)]
+            result.lessons_applied = len(self._recalled)
+            if self._recalled:
+                self.ledger.append(
+                    "memory", "recall", rationale=f"{len(self._recalled)} lessons for: {intent[:60]}",
+                    decision="INFO",
+                )
+
         judge = self._agent("reviewer")
 
         for stage, role, use_fanout in _PIPELINE:
@@ -172,6 +191,8 @@ class Factory:
                 )
             )
 
+            result.findings.extend(primary.findings)
+
             # Carry the winning artifact forward as context for the next stage.
             context = primary.text
 
@@ -189,6 +210,18 @@ class Factory:
             and any(s.stage == "operate" and s.passed for s in result.stages)
         )
         result.metrics = self.metrics.summary()
+
+        # Reflect: distill durable lessons from this run into semantic memory.
+        if self.memory is not None:
+            from ..memory import reflect_on_run
+
+            learned = reflect_on_run(result, self.memory)
+            if learned:
+                self.ledger.append(
+                    "memory", "reflect", rationale=f"{len(learned)} lessons learned",
+                    decision="INFO",
+                )
+
         result.ledger_ok = self.ledger.verify()
         self.ledger.append(
             "factory",

@@ -54,6 +54,9 @@ class Config:
     ledger_path: str = ".nyx/audit.ledger.jsonl"
     log_level: str = "INFO"
 
+    # Memory (semantic lessons)
+    memory_path: str = ".nyx/memory.jsonl"
+
     model_for_role: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -99,6 +102,7 @@ def load_config(dotenv: bool = True) -> Config:
         evolution_threshold=_float("NYX_EVOLUTION_THRESHOLD", 0.02),
         ledger_path=os.environ.get("NYX_LEDGER", ".nyx/audit.ledger.jsonl"),
         log_level=os.environ.get("NYX_LOG_LEVEL", "INFO").upper(),
+        memory_path=os.environ.get("NYX_MEMORY", ".nyx/memory.jsonl"),
     )
     cfg.model_for_role = {
         "architect": cfg.model_architect,

@@ -57,6 +57,8 @@ into something a single founder can run from a mini‑PC:
 | **Fan‑Out Factory** | Many agents work the same stage in parallel; the best result wins | [`nyx/factory/fanout.py`](nyx/factory/fanout.py) |
 | **Constitutional AI** | Principles enforced on every model call | [`nyx/constitution.py`](nyx/constitution.py) |
 | **Self‑Evolving Agents** | Darwin‑Gödel archive of improving agents | [`nyx/evolution`](nyx/evolution) |
+| **Memory & continual learning** | Episodic + procedural + semantic memory; reflect → remember → recall | [`nyx/memory.py`](nyx/memory.py) |
+| **Real benchmark** | SWE‑bench‑style: run generated code in the sandbox, score pass‑rate | [`nyx/evolution/benchmarks.py`](nyx/evolution/benchmarks.py) |
 | **Secure AI** | Prompt‑injection guards, secret hygiene, sandboxing | [`nyx/security`](nyx/security) |
 | **Operational Excellence** | Audit ledger, metrics, SRE agent | [`nyx/observability`](nyx/observability) |
 | **Ollama Cloud brain** | One config, any frontier‑class cloud model | [`nyx/providers/ollama_cloud.py`](nyx/providers/ollama_cloud.py) |
@@ -106,6 +108,31 @@ runs (and the gains persist across missions via the evolution archive). Every
 step is constitution-gated and written to the tamper-evident audit ledger, so
 "keeps going" never means "runs unchecked."
 
+## "How does it remember and learn?"
+
+NYX learns on **three memory substrates** that reinforce each other (full
+detail in [docs/MEMORY.md](docs/MEMORY.md)):
+
+| Layer | Answers | Lives in |
+| --- | --- | --- |
+| **Episodic** | *What happened?* | hash‑chained [audit ledger](nyx/observability/ledger.py) |
+| **Procedural** | *How do we get better at the job?* | [evolution archive](nyx/evolution/archive.py) (improved agent genomes) |
+| **Semantic** | *What did we learn to reuse?* | [memory store](nyx/memory.py) (distilled lessons) |
+
+After every run the factory **reflects** — distilling lessons (a blocked gate →
+a guardrail rule, a finding → a risk note, a clean ship → a reinforced pattern)
+— **remembers** them, and on the next task **recalls** the relevant ones and
+injects them into every agent's prompt. Meanwhile evolution banks better agents,
+and the ledger keeps the full record:
+
+```
+execute → REFLECT → REMEMBER → RECALL next time → better execution
+         ↘ EVOLVE (better agents, adopted back in) ↗
+```
+
+No vector DB, no retraining — it runs offline on the mini‑PC. `nyx memory`
+shows what it has learned.
+
 No API key? NYX runs in **deterministic mock mode** so you can explore the whole
 factory offline. Add an Ollama key to `.env` to switch the brain on.
 
@@ -122,6 +149,7 @@ one‑shot installer [`scripts/setup-windows11.ps1`](scripts/setup-windows11.ps1
 - [Constitution](constitution/constitution.yaml) — the DNA
 - [Security model](docs/SECURITY.md) — secure‑AI guarantees
 - [Evolution](docs/EVOLUTION.md) — how agents improve themselves
+- [Memory & learning](docs/MEMORY.md) — how the factory remembers and gets wiser
 - [Windows 11 deployment](docs/DEPLOYMENT_WINDOWS11.md)
 
 ## Status

@@ -25,6 +25,7 @@ from .config import Config, load_config
 from .constitution import Constitution
 from .evolution.archive import Archive
 from .evolution.engine import EvolutionEngine
+from .memory import MemoryStore
 from .observability.ledger import AuditLedger
 from .observability.metrics import Metrics
 from .providers import build_provider
@@ -52,6 +53,9 @@ class MissionReport:
     genome_score_before: float | None = None
     genome_score_after: float | None = None
     ledger_ok: bool = True
+    budget_exhausted: bool = False
+    calls: int = 0
+    lessons: int = 0
 
     @property
     def shipped(self) -> int:
@@ -77,6 +81,8 @@ class MissionReport:
             f"evolutions: {self.evolutions} | genome {self.genome_score_before}→"
             f"{self.genome_score_after} (gain {self.evolution_gain:+})"
         )
+        budget = f"calls: {self.calls}" + (" (budget exhausted)" if self.budget_exhausted else "")
+        lines.append(f"Lessons in memory: {self.lessons} | {budget}")
         lines.append(f"Audit ledger intact: {self.ledger_ok}")
         return "\n".join(lines)
 
@@ -91,6 +97,7 @@ class MissionControl:
         constitution: Constitution | None = None,
         ledger: AuditLedger | None = None,
         archive: Archive | None = None,
+        memory: MemoryStore | None = None,
         evolve_role: str = "coder",
     ):
         self.config = config or load_config()
@@ -101,10 +108,20 @@ class MissionControl:
         self.ledger = ledger or AuditLedger(self.config.ledger_path)
         # Archive defines __len__, so an empty one is falsy; use `is None`.
         self.archive = archive if archive is not None else Archive(self.config.evolution_archive)
+        # Semantic memory persists lessons across cycles and missions.
+        self.memory = memory if memory is not None else MemoryStore(self.config.memory_path)
         self.evolve_role = evolve_role
+        # One mission-level metrics object enforces a single call/spend budget
+        # (Config.max_calls) across planning, every build cycle, and evolution —
+        # so the autonomous loop cannot spend max_cycles * max_calls.
+        self.metrics = Metrics()
         # Genomes adopted into the factory, seeded from any prior evolution.
         self.genomes: dict = {}
         self._adopt_from_archive()
+
+    @property
+    def budget_left(self) -> int:
+        return max(0, self.config.max_calls - self.metrics.calls)
 
     def _adopt_from_archive(self) -> float | None:
         best = self.archive.best_for(self.evolve_role)
@@ -117,7 +134,7 @@ class MissionControl:
     def plan(self, objective: str, max_items: int = 6) -> list[str]:
         planner = build_agent(
             "planner", self.config, self.provider, self.constitution,
-            ledger=self.ledger, metrics=Metrics(),
+            ledger=self.ledger, metrics=self.metrics,
         )
         # The planner's charter already says "decompose"; pass the bare objective
         # so backlog items read cleanly.
@@ -158,19 +175,37 @@ class MissionControl:
         while backlog:
             if max_cycles is not None and idx >= max_cycles:
                 break
+            if self.budget_left <= 0:
+                report.budget_exhausted = True
+                self.ledger.append(
+                    "mission", "budget_exhausted",
+                    rationale=f"calls={self.metrics.calls}/{self.config.max_calls}", decision="BLOCK",
+                )
+                break
             item = backlog.pop(0)
             idx += 1
 
+            # One shared metrics object => one budget across the whole mission.
             factory = Factory(
                 config=self.config,
                 provider=self.provider,
                 constitution=self.constitution,
                 ledger=self.ledger,
-                metrics=Metrics(),
+                metrics=self.metrics,
                 genomes=self.genomes,
+                memory=self.memory,
             )
-            approver = (lambda *_: self.config.autonomy == "autonomous")
+            def approver(*_):
+                return self.config.autonomy == "autonomous"
+
+            # Snapshot the shared counters so we can report this cycle's deltas.
+            calls0 = self.metrics.calls
+            passed0, blocked0 = self.metrics.gates_passed, self.metrics.gates_blocked
+
             result = factory.build(item, approver=approver)
+
+            gp = self.metrics.gates_passed - passed0
+            gb = self.metrics.gates_blocked - blocked0
             report.cycles.append(
                 CycleOutcome(
                     index=idx,
@@ -178,13 +213,14 @@ class MissionControl:
                     shipped=result.shipped,
                     held=result.held_for_approval,
                     blocked_at=result.blocked_at,
-                    gate_pass_rate=factory.metrics.gate_pass_rate,
-                    calls=factory.metrics.calls,
+                    gate_pass_rate=round(gp / (gp + gb), 3) if (gp + gb) else 1.0,
+                    calls=self.metrics.calls - calls0,
                 )
             )
 
-            # Periodically evolve and adopt improved agents (Darwin in the loop).
-            if evolve_every and idx % evolve_every == 0:
+            # Periodically evolve and adopt improved agents (Darwin in the loop),
+            # but only while budget remains.
+            if evolve_every and idx % evolve_every == 0 and self.budget_left > 0:
                 self._evolve_and_adopt(generations)
                 report.evolutions += 1
 
@@ -193,13 +229,20 @@ class MissionControl:
                 backlog = self.plan(f"{objective} (continue improving)")
 
         report.genome_score_after = self._adopt_from_archive() or report.genome_score_before
+        report.calls = self.metrics.calls
+        report.lessons = len(self.memory)
         report.ledger_ok = self.ledger.verify()
         self.ledger.append(
             "mission",
             "mission_end",
             rationale=f"shipped={report.shipped}/{len(report.cycles)} evolutions={report.evolutions}",
             decision="INFO",
-            data={"productivity": report.productivity, "evolution_gain": report.evolution_gain},
+            data={
+                "productivity": report.productivity,
+                "evolution_gain": report.evolution_gain,
+                "calls": report.calls,
+                "max_calls": self.config.max_calls,
+            },
         )
         return report
 
@@ -211,6 +254,7 @@ class MissionControl:
             archive=self.archive,
             ledger=self.ledger,
             role=self.evolve_role,
+            metrics=self.metrics,  # evolution shares the mission call budget
         )
         engine.evolve(generations=generations)
         best = self.archive.best_for(self.evolve_role)

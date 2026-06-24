@@ -57,6 +57,36 @@ def test_genome_carries_over_between_missions(config, constitution_path):
     assert "coder" in mc2.genomes
 
 
+def test_mission_respects_shared_call_budget(config, constitution_path):
+    """Codex P1: the budget must be shared across cycles, not reset each cycle."""
+    config.autonomy = "autonomous"
+    config.fanout = 2
+    config.max_calls = 20
+    mc = _control(config, constitution_path)
+    report = mc.run("A large objective with many features", max_cycles=10, evolve_every=0)
+    # Total spend respects the single budget (with at most one stage of slop),
+    # NOT max_cycles * max_calls.
+    assert report.calls <= config.max_calls + 6
+    assert report.budget_exhausted
+
+
+def test_evolution_is_role_scoped_on_shared_archive(config, constitution_path):
+    """Codex P2: evolving a new role on an archive that already has another
+    role's genomes must still seed and produce a genome for the requested role."""
+    const = Constitution.load(constitution_path)
+    archive = Archive(config.evolution_archive)
+    provider = MockProvider(config)
+
+    EvolutionEngine(config=config, provider=provider, constitution=const,
+                    archive=archive, role="coder").evolve(generations=4)
+    assert archive.best_for("reviewer") is None  # nothing for reviewer yet
+
+    report = EvolutionEngine(config=config, provider=provider, constitution=const,
+                             archive=archive, role="reviewer").evolve(generations=4)
+    assert archive.best_for("reviewer") is not None  # seeded + evolved in-role
+    assert report.best_genome.get("role") == "reviewer"
+
+
 def test_keep_going_replans_when_backlog_empties(config, constitution_path):
     config.autonomy = "autonomous"
     mc = _control(config, constitution_path)
