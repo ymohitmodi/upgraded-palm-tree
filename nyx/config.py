@@ -61,6 +61,15 @@ class Config:
     # Consolidation ("sleep"): run a consolidation pass every N build cycles.
     consolidate_every: int = 5
 
+    # Tools / connectivity (live data; see docs/TOOLS.md)
+    user_agent: str = "nyx-dark-factory/0.1 (+research; contact@example.com)"
+    edgar_identity: str = ""               # "Your Name your.email@example.com" for SEC
+    web_cache_dir: str = ".nyx/webcache"
+    web_rate_limit_seconds: float = 1.0    # min delay between hits to the same host
+    # Allowlist of domains the scraper may fetch (empty = allow all, use with care).
+    allowed_domains: tuple[str, ...] = ()
+    mcp_manifest: str = ".nyx/mcp.json"    # registered MCP servers
+
     model_for_role: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -109,6 +118,16 @@ def load_config(dotenv: bool = True) -> Config:
         memory_path=os.environ.get("NYX_MEMORY", ".nyx/memory.jsonl"),
         context_char_budget=int(os.environ.get("NYX_CONTEXT_BUDGET", "4000")),
         consolidate_every=int(os.environ.get("NYX_CONSOLIDATE_EVERY", "5")),
+        user_agent=os.environ.get(
+            "NYX_USER_AGENT", "nyx-dark-factory/0.1 (+research; contact@example.com)"
+        ),
+        edgar_identity=os.environ.get("EDGAR_IDENTITY", ""),
+        web_cache_dir=os.environ.get("NYX_WEB_CACHE", ".nyx/webcache"),
+        web_rate_limit_seconds=float(os.environ.get("NYX_WEB_RATE_LIMIT", "1.0")),
+        allowed_domains=tuple(
+            d.strip() for d in os.environ.get("NYX_ALLOWED_DOMAINS", "").split(",") if d.strip()
+        ),
+        mcp_manifest=os.environ.get("NYX_MCP_MANIFEST", ".nyx/mcp.json"),
     )
     cfg.model_for_role = {
         "architect": cfg.model_architect,

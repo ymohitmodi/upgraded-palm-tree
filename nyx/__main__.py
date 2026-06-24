@@ -161,6 +161,44 @@ def cmd_memory(args) -> int:
     return 0
 
 
+def cmd_tools(args) -> int:
+    """List the tools/MCP servers NYX can use, and connectivity status."""
+    from .tools import build_toolbox
+
+    cfg = load_config()
+    print(_banner(cfg) + "\n")
+    box = build_toolbox(cfg, ledger=AuditLedger(cfg.ledger_path))
+    print("Available tools:")
+    print(box.describe())
+    print(f"\nWeb: UA={cfg.user_agent!r}  cache={cfg.web_cache_dir}  "
+          f"allowlist={list(cfg.allowed_domains) or 'ALL'}")
+    print(f"EDGAR identity set: {bool(cfg.edgar_identity)}  | MCP manifest: {cfg.mcp_manifest}")
+    return 0
+
+
+def cmd_ingest_buffett(args) -> int:
+    """Seed Buffett doctrine into long-term memory (and optionally fetch letters)."""
+    from .domains.investing import fetch_letters, seed_principles
+    from .memory import MemoryStore
+
+    cfg = load_config()
+    store = MemoryStore(cfg.memory_path)
+    n = seed_principles(store)
+    print(f"Seeded {n} Buffett principles into long-term memory.")
+    if args.fetch:
+        from .tools import WebFetcher
+
+        fetcher = WebFetcher(cache_dir=cfg.web_cache_dir, user_agent=cfg.user_agent,
+                             allowed_domains=cfg.allowed_domains,
+                             rate_limit_seconds=cfg.web_rate_limit_seconds)
+        print(f"Fetching Berkshire letters {args.start}-{args.end} (needs network access)…")
+        stats = fetch_letters(fetcher, store, start=args.start, end=args.end)
+        print(f"  letters fetched={stats['fetched']} skipped={stats['skipped']}")
+    print(f"Memory now holds {len(store)} lessons "
+          f"({store.stats()['long_term']} long-term). Use `nyx memory` to inspect.")
+    return 0
+
+
 def cmd_doctor(args) -> int:
     cfg = load_config()
     print(_banner(cfg) + "\n")
@@ -293,6 +331,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="run a consolidation 'sleep' pass (decay, abstract, prune)")
     m.add_argument("--tail", type=int, default=20)
     m.set_defaults(func=cmd_memory)
+
+    tl = sub.add_parser("tools", help="list available tools / MCP servers")
+    tl.set_defaults(func=cmd_tools)
+
+    ib = sub.add_parser("ingest-buffett", help="seed Buffett doctrine into long-term memory")
+    ib.add_argument("--fetch", action="store_true", help="also fetch Berkshire letters (needs network)")
+    ib.add_argument("--start", type=int, default=1977)
+    ib.add_argument("--end", type=int, default=2024)
+    ib.set_defaults(func=cmd_ingest_buffett)
 
     d = sub.add_parser("doctor", help="verify configuration and health")
     d.set_defaults(func=cmd_doctor)

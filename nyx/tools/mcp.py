@@ -1,0 +1,141 @@
+"""MCP (Model Context Protocol) support — register external tool servers.
+
+NYX can use any MCP server (e.g. edgartools-mcp) as a source of tools. Servers
+are declared in a manifest (default ``.nyx/mcp.json``), in the same shape as
+Claude Desktop's ``mcpServers`` block, so configs are portable:
+
+    {
+      "mcpServers": {
+        "edgar": {
+          "command": "python", "args": ["-m", "edgar.ai"],
+          "env": {"EDGAR_IDENTITY": "Your Name your.email@example.com"}
+        }
+      }
+    }
+
+``MCPClient`` speaks the minimal stdio JSON-RPC needed to ``initialize``, list
+tools, and call them. It's intentionally small and best-effort: spawning a live
+server needs that server installed and (for edgar) network access, so the live
+path is exercised in deployment, while tests cover manifest parsing only.
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .registry import ToolRegistry, ToolResult
+
+
+@dataclass
+class MCPServerSpec:
+    name: str
+    command: str
+    args: list[str] = field(default_factory=list)
+    env: dict[str, str] = field(default_factory=dict)
+
+
+def load_manifest(path: str | Path) -> list[MCPServerSpec]:
+    p = Path(path)
+    if not p.exists():
+        return []
+    data = json.loads(p.read_text(encoding="utf-8"))
+    servers = data.get("mcpServers", data)  # accept either shape
+    specs = []
+    for name, cfg in servers.items():
+        specs.append(MCPServerSpec(
+            name=name, command=cfg["command"],
+            args=list(cfg.get("args", [])), env=dict(cfg.get("env", {})),
+        ))
+    return specs
+
+
+def write_sample_manifest(path: str | Path, identity: str = "Your Name your.email@example.com") -> Path:
+    """Write a ready-to-edit manifest registering the edgartools MCP server."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({
+        "mcpServers": {
+            "edgar": {
+                "command": "python", "args": ["-m", "edgar.ai"],
+                "env": {"EDGAR_IDENTITY": identity},
+            }
+        }
+    }, indent=2), encoding="utf-8")
+    return p
+
+
+class MCPClient:
+    """Minimal stdio JSON-RPC client for a single MCP server."""
+
+    def __init__(self, spec: MCPServerSpec, timeout: float = 30.0):
+        self.spec = spec
+        self.timeout = timeout
+        self._proc: subprocess.Popen | None = None
+        self._id = 0
+
+    def __enter__(self):  # pragma: no cover - requires a live server
+        import os
+
+        env = {**os.environ, **self.spec.env}
+        self._proc = subprocess.Popen(
+            [self.spec.command, *self.spec.args],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, env=env, bufsize=1,
+        )
+        self._rpc("initialize", {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {}, "clientInfo": {"name": "nyx", "version": "0.1"},
+        })
+        self._notify("notifications/initialized", {})
+        return self
+
+    def __exit__(self, *exc):  # pragma: no cover
+        if self._proc:
+            self._proc.terminate()
+
+    def _rpc(self, method: str, params: dict) -> dict:  # pragma: no cover - live only
+        self._id += 1
+        msg = {"jsonrpc": "2.0", "id": self._id, "method": method, "params": params}
+        self._proc.stdin.write(json.dumps(msg) + "\n")
+        self._proc.stdin.flush()
+        for line in self._proc.stdout:
+            resp = json.loads(line)
+            if resp.get("id") == self._id:
+                if "error" in resp:
+                    raise RuntimeError(resp["error"])
+                return resp.get("result", {})
+        raise RuntimeError("MCP server closed without responding")
+
+    def _notify(self, method: str, params: dict) -> None:  # pragma: no cover - live only
+        self._proc.stdin.write(json.dumps(
+            {"jsonrpc": "2.0", "method": method, "params": params}) + "\n")
+        self._proc.stdin.flush()
+
+    def list_tools(self) -> list[dict]:  # pragma: no cover - live only
+        return self._rpc("tools/list", {}).get("tools", [])
+
+    def call_tool(self, name: str, arguments: dict) -> ToolResult:  # pragma: no cover - live only
+        result = self._rpc("tools/call", {"name": name, "arguments": arguments})
+        parts = [c.get("text", "") for c in result.get("content", []) if c.get("type") == "text"]
+        return ToolResult(ok=not result.get("isError"), data="\n".join(parts))
+
+
+def register_mcp_servers(registry: ToolRegistry, manifest_path: str | Path) -> list[str]:
+    """Register a thin proxy tool per configured MCP server (lazy connect)."""
+    registered = []
+    for spec in load_manifest(manifest_path):
+        def _make(spec: MCPServerSpec):
+            def mcp_call(tool: str, arguments: dict | None = None) -> ToolResult:  # pragma: no cover
+                with MCPClient(spec) as client:
+                    return client.call_tool(tool, arguments or {})
+            return mcp_call
+
+        registry.add(
+            f"mcp.{spec.name}",
+            f"Call a tool on the '{spec.name}' MCP server ({spec.command} {' '.join(spec.args)}).",
+            _make(spec), {"tool": "tool name on the server", "arguments": "dict of args"},
+        )
+        registered.append(spec.name)
+    return registered

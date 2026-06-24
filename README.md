@@ -156,6 +156,7 @@ one‑shot installer [`scripts/setup-windows11.ps1`](scripts/setup-windows11.ps1
 - [Security model](docs/SECURITY.md) — secure‑AI guarantees
 - [Evolution](docs/EVOLUTION.md) — how agents improve themselves
 - [Memory & learning](docs/MEMORY.md) — how the factory remembers and gets wiser
+- [Tools, MCP & web access](docs/TOOLS.md) — equipping NYX with EDGAR/MCP/scraping
 - [Windows 11 deployment](docs/DEPLOYMENT_WINDOWS11.md)
 
 ## Status
