@@ -74,7 +74,8 @@ class EvolutionEngine:
         self.constitution = constitution or Constitution.load(
             self.config.constitution_path, mode=self.config.constitution_mode
         )
-        self.archive = archive or Archive(self.config.evolution_archive)
+        # NB: Archive defines __len__, so an empty one is falsy; use `is None`.
+        self.archive = archive if archive is not None else Archive(self.config.evolution_archive)
         self.ledger = ledger or AuditLedger(self.config.ledger_path)
         self.role = role
         self.benchmark = benchmark or self._default_benchmark
@@ -95,14 +96,9 @@ class EvolutionEngine:
         return agent
 
     def _seed_genome(self) -> Genome:
-        """A deliberately *naive* baseline so evolution has headroom to climb
-        toward the engineering doctrine (realistic: agents start weak)."""
-        return Genome(
-            role=self.role,
-            system_prompt=f"You are a {self.role}. Do the task.",
-            model_role=self.role if self.role in ("coder", "reviewer", "architect") else "fast",
-            temperature=0.7,
-        )
+        """Seed from the role's *production* charter so evolution searches for
+        improvements above the baseline and adopted genomes never regress."""
+        return build_agent(self.role, self.config, self.provider, self.constitution).genome
 
     # -- mutation ------------------------------------------------------------
     def mutate(self, genome: Genome) -> Genome:

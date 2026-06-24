@@ -9,6 +9,15 @@ from __future__ import annotations
 from .base import Agent
 
 
+class PlannerAgent(Agent):
+    default_model_role = "architect"
+    charter = (
+        "You are the Planner. Decompose the operator's objective into a backlog "
+        "of 3-6 concrete, independently shippable features. Output ONE feature "
+        "per line, each starting with '- '. No preamble, no numbering, no prose."
+    )
+
+
 class ExplorerAgent(Agent):
     default_model_role = "fast"
     charter = (
@@ -85,6 +94,7 @@ class SecurityAgent(Agent):
 
 
 ROLE_REGISTRY: dict[str, type[Agent]] = {
+    "planner": PlannerAgent,
     "explorer": ExplorerAgent,
     "architect": ArchitectAgent,
     "coder": CoderAgent,

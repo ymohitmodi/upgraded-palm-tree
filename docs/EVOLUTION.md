@@ -64,6 +64,21 @@ The same engine can propose **amendments to the Constitution itself** — but
 weakens any `immutable: true` core principle is rejected. The factory's values
 can only get safer over time.
 
+## Closing the loop: evolution feeds the factory
+
+Evolution is not a side activity — it is wired into the
+[autonomous mission loop](../nyx/mission.py). When you run `nyx run "<objective>"`,
+the controller periodically calls the evolution engine, then **adopts the
+archive's best genome for the role back into the factory** (`Factory(genomes=...)`).
+Subsequent build cycles are therefore executed by *improved* agents, and the
+gains persist across missions because the archive is on disk. That is the
+compounding flywheel: every mission both ships features and upgrades the
+workforce that ships them.
+
+Seeds come from each role's **production charter** (not a naive baseline), so an
+adopted genome can only match or beat the default — evolution never regresses
+the factory.
+
 ## Why this matters for a solopreneur
 
 You don't hire senior engineers; your agents *become* senior engineers. Every

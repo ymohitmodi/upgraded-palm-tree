@@ -84,6 +84,7 @@ class Factory:
         constitution: Constitution | None = None,
         ledger: AuditLedger | None = None,
         metrics: Metrics | None = None,
+        genomes: dict | None = None,
     ):
         self.config = config or load_config()
         self.provider = provider or build_provider(self.config)
@@ -92,6 +93,9 @@ class Factory:
         )
         self.ledger = ledger or AuditLedger(self.config.ledger_path)
         self.metrics = metrics or Metrics()
+        # Evolved genomes adopted per role (from the evolution archive). When a
+        # role has an adopted genome, agents run with that improved DNA.
+        self.genomes: dict = genomes or {}
 
     # -- agent factory -------------------------------------------------------
     def _agent(self, role: str) -> Agent:
@@ -102,6 +106,7 @@ class Factory:
             self.constitution,
             ledger=self.ledger,
             metrics=self.metrics,
+            genome=self.genomes.get(role),
         )
 
     # -- run -----------------------------------------------------------------

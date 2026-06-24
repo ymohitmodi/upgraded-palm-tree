@@ -7,6 +7,9 @@ a clean seam to the next.
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  OPERATOR (human)            nyx CLI  ── intent, gates, taste              │
 ├──────────────────────────────────────────────────────────────────────────┤
+│  MISSION CONTROL             nyx/mission.py                                │
+│   objective → plan → [build cycle]×N → evolve → adopt genome → repeat      │
+├──────────────────────────────────────────────────────────────────────────┤
 │  FACTORY ORCHESTRATOR        nyx/factory/orchestrator.py                   │
 │   Explore → Design → Build → Review → Test → Ship → Operate               │
 │   each stage runs a FAN-OUT swarm (nyx/factory/fanout.py)                  │
@@ -25,6 +28,23 @@ a clean seam to the next.
 │  PROVIDER (the brain)        nyx/providers/ollama_cloud.py → Ollama Cloud  │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
+
+## The autonomous mission loop
+
+`nyx run "<objective>"` is the self-driving entrypoint
+([`nyx/mission.py`](../nyx/mission.py)). It turns a single objective into
+continuous, compounding output:
+
+1. **Plan** — a Planner agent decomposes the objective into a backlog of
+   shippable features.
+2. **Build** — each feature runs the full gated pipeline below.
+3. **Evolve** — every *K* cycles, the Darwin-Gödel engine runs and the best
+   genome is **adopted back into the factory**, so later cycles use better agents.
+4. **Repeat** — until the backlog drains, or (`--keep-going`) re-plan and
+   continue, always bounded by the call budget and the constitution.
+
+The flywheel: the factory ships features *and* upgrades the agents that ship
+them, with gains persisted in the evolution archive across missions.
 
 ## The pipeline (Dark Factory SDLC)
 

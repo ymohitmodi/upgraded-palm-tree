@@ -75,6 +75,15 @@ class MockProvider:
 
 def _render(role: str, topic: str, seed: int, temperature: float) -> str:
     variant = seed % 3
+    if role == "planner":
+        # Deterministic backlog decomposition of the objective.
+        facets = [
+            "core flow", "data model + persistence", "input validation & errors",
+            "observability (logs+metrics)", "tests & acceptance", "polish & docs",
+        ]
+        n = 3 + (seed % 3)  # 3..5 features
+        lines = [f"- {topic}: {facets[i % len(facets)]}" for i in range(n)]
+        return "\n".join(lines)
     if role == "explorer":
         return (
             f"# Opportunity brief: {topic}\n"

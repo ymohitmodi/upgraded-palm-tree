@@ -12,6 +12,7 @@ __version__ = "0.1.0"
 from .config import Config, load_config
 from .constitution import Constitution
 from .factory.orchestrator import Factory, FactoryResult
+from .mission import MissionControl, MissionReport
 
 __all__ = [
     "__version__",
@@ -20,4 +21,6 @@ __all__ = [
     "Constitution",
     "Factory",
     "FactoryResult",
+    "MissionControl",
+    "MissionReport",
 ]

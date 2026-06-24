@@ -52,6 +52,7 @@ into something a single founder can run from a mini‑PC:
 
 | Pillar | What it means in NYX | Module |
 | --- | --- | --- |
+| **Autonomous mission loop** | Objective → plan → build → evolve → adopt → repeat | [`nyx/mission.py`](nyx/mission.py) |
 | **Dark Factory** | End‑to‑end autonomous SDLC pipeline | [`nyx/factory`](nyx/factory) |
 | **Fan‑Out Factory** | Many agents work the same stage in parallel; the best result wins | [`nyx/factory/fanout.py`](nyx/factory/fanout.py) |
 | **Constitutional AI** | Principles enforced on every model call | [`nyx/constitution.py`](nyx/constitution.py) |
@@ -72,13 +73,38 @@ cp .env.example .env
 # 3. Run a full dark-factory build of a feature, end to end
 nyx build "Add a usage-based billing dashboard with Stripe metering"
 
-# 4. Watch the constitutional, audited pipeline run
+# 4. Or hand NYX an OBJECTIVE and let it run autonomously:
+#    plan -> build each feature -> evolve its agents -> adopt the winners -> repeat
+nyx run "Launch a SaaS analytics product" --autonomy autonomous --keep-going
+
+# 5. Watch the constitutional, audited pipeline run
 nyx status
 nyx ledger --tail 20
 
-# 5. Let the agents evolve themselves against a benchmark
+# 6. Let the agents evolve themselves against a benchmark
 nyx evolve --generations 5
 ```
+
+## "If I give it an objective, will it keep going, stay productive, and evolve?"
+
+**Yes — that's what `nyx run` does.** Hand it one objective and the
+[mission controller](nyx/mission.py) closes the loop:
+
+```
+objective ─▶ PLAN (decompose into a backlog of shippable features)
+          ─▶ for each feature: run the DARK FACTORY pipeline (gated, audited)
+          ─▶ every K cycles: run DARWIN evolution (admit a variant only if it
+             beats its ancestor on the benchmark)
+          ─▶ ADOPT the improved genome so later cycles run on better agents
+          ─▶ repeat until the backlog drains (or with --keep-going, re-plan
+             and continue) — bounded by the call budget and the constitution
+```
+
+So a single objective produces continuous, compounding output: it ships
+features **and** the agents shipping them get measurably better as the mission
+runs (and the gains persist across missions via the evolution archive). Every
+step is constitution-gated and written to the tamper-evident audit ledger, so
+"keeps going" never means "runs unchecked."
 
 No API key? NYX runs in **deterministic mock mode** so you can explore the whole
 factory offline. Add an Ollama key to `.env` to switch the brain on.
@@ -100,11 +126,12 @@ one‑shot installer [`scripts/setup-windows11.ps1`](scripts/setup-windows11.ps1
 
 ## Status
 
-NYX is a **reference implementation and framework**. The orchestration,
-constitution engine, evolution archive, guardrails, and Ollama Cloud provider
-are functional. Agent "work" is performed by real model calls when a key is
-present and by deterministic stubs otherwise, so the architecture is fully
-runnable and testable today.
+NYX is a **reference implementation and framework**. The autonomous mission
+loop, orchestration, constitution engine, evolution archive (with genomes
+adopted back into the factory), guardrails, audit ledger, and Ollama Cloud
+provider are all functional and covered by tests. Agent "work" is performed by
+real model calls when a key is present and by deterministic stubs otherwise, so
+the architecture is fully runnable and testable today.
 
 ## License
 

@@ -60,6 +60,29 @@ def cmd_build(args) -> int:
     return 0 if (result.shipped or result.held_for_approval) else 1
 
 
+def cmd_run(args) -> int:
+    """Autonomous mission: plan -> build -> evolve -> adopt -> repeat."""
+    from .mission import MissionControl
+
+    cfg = load_config()
+    if args.autonomy:
+        cfg.autonomy = args.autonomy
+    if args.fanout:
+        cfg.fanout = args.fanout
+    print(_banner(cfg) + "\n")
+    control = MissionControl(config=cfg, evolve_role=args.evolve_role)
+    report = control.run(
+        args.objective,
+        max_cycles=args.max_cycles,
+        evolve_every=args.evolve_every,
+        generations=args.generations,
+        keep_going=args.keep_going,
+        autonomy=args.autonomy,
+    )
+    print("\n" + report.summary())
+    return 0
+
+
 def cmd_evolve(args) -> int:
     from .evolution.engine import EvolutionEngine
 
@@ -182,6 +205,17 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--yes", action="store_true", help="auto-approve gated deploys")
     b.add_argument("--show", action="store_true", help="print every stage artifact")
     b.set_defaults(func=cmd_build)
+
+    r = sub.add_parser("run", help="autonomous mission: plan, build, evolve, repeat")
+    r.add_argument("objective", help="the high-level objective to pursue")
+    r.add_argument("--max-cycles", type=int, default=6, help="cap on build cycles")
+    r.add_argument("--evolve-every", type=int, default=2, help="evolve every N cycles (0=never)")
+    r.add_argument("--generations", type=int, default=4, help="evolution generations per round")
+    r.add_argument("--evolve-role", default="coder", help="which role to evolve")
+    r.add_argument("--keep-going", action="store_true", help="re-plan and continue when backlog empties")
+    r.add_argument("--autonomy", choices=["assisted", "supervised", "autonomous"])
+    r.add_argument("--fanout", type=int)
+    r.set_defaults(func=cmd_run)
 
     e = sub.add_parser("evolve", help="run agent self-improvement")
     e.add_argument("-g", "--generations", type=int, default=5)

@@ -58,6 +58,11 @@ class Archive:
     def best(self) -> GenomeRecord | None:
         return max(self.records, key=lambda r: r.score) if self.records else None
 
+    def best_for(self, role: str) -> GenomeRecord | None:
+        """Highest-scoring admitted genome for a given role, if any."""
+        candidates = [r for r in self.records if r.genome.get("role") == role]
+        return max(candidates, key=lambda r: r.score) if candidates else None
+
     def select_parent(self, rng) -> GenomeRecord | None:
         """Pick a parent favoring high score, but with novelty: occasionally
         branch from a less-explored (fewer children) genome to stay open-ended.
