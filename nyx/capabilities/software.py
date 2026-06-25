@@ -1,0 +1,43 @@
+"""The original software dark-factory, expressed as a Capability.
+
+This makes the point that the factory is just one capability among many: the same
+runner that drives the value investor drives software delivery.
+"""
+from __future__ import annotations
+
+import re
+
+from ..agents.roles import build_agent
+from ..factory.orchestrator import Factory
+from .base import Capability, CycleContext, CycleResult
+
+
+class SoftwareFactoryCapability(Capability):
+    name = "software"
+    description = "Build & ship software through the gated SDLC pipeline."
+
+    def matches(self, objective: str) -> bool:
+        return True  # the catch-all default
+
+    def evolve_role(self) -> str:
+        return "coder"
+
+    def plan(self, objective: str, ctx: CycleContext) -> list[str]:
+        planner = build_agent("planner", ctx.config, ctx.provider, ctx.constitution,
+                              ledger=ctx.ledger, metrics=ctx.metrics)
+        items = []
+        for line in planner.run(objective).text.splitlines():
+            m = re.match(r"\s*[-*]\s+(.*)", line)
+            if m and m.group(1).strip():
+                items.append(m.group(1).strip())
+        return items or [f"{objective} — milestone {i + 1}" for i in range(3)]
+
+    def execute(self, task: str, ctx: CycleContext) -> CycleResult:
+        factory = Factory(config=ctx.config, constitution=ctx.constitution, ledger=ctx.ledger,
+                          metrics=ctx.metrics, genomes=ctx.genomes, memory=ctx.memory)
+        r = factory.build(task, approver=lambda *_: ctx.config.autonomy == "autonomous")
+        return CycleResult(
+            item=task, ok=r.shipped or r.held_for_approval, blocked_at=r.blocked_at,
+            summary=f"shipped={r.shipped} held={r.held_for_approval}",
+            score=factory.metrics.gate_pass_rate, findings=r.findings,
+        )

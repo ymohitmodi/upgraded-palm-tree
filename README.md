@@ -57,8 +57,9 @@ into something a single founder can run from a mini‑PC:
 | **Fan‑Out Factory** | Many agents work the same stage in parallel; the best result wins | [`nyx/factory/fanout.py`](nyx/factory/fanout.py) |
 | **Constitutional AI** | Principles enforced on every model call | [`nyx/constitution.py`](nyx/constitution.py) |
 | **Self‑Evolving Agents** | Darwin‑Gödel archive of improving agents | [`nyx/evolution`](nyx/evolution) |
-| **Memory & continual learning** | Episodic + procedural + semantic memory; reflect → remember → recall | [`nyx/memory.py`](nyx/memory.py) |
-| **Real benchmark** | SWE‑bench‑style: run generated code in the sandbox, score pass‑rate | [`nyx/evolution/benchmarks.py`](nyx/evolution/benchmarks.py) |
+| **Memory & continual learning** | Episodic + procedural + semantic memory; reflect → remember → recall → consolidate | [`nyx/memory.py`](nyx/memory.py) |
+| **Pluggable capabilities** | Drop‑in goal handlers on one autonomous runner (e.g. value investing) | [`nyx/capabilities`](nyx/capabilities) |
+| **Real benchmarks** | SWE‑bench‑style code execution + point‑in‑time value backtest | [`nyx/evolution/benchmarks.py`](nyx/evolution/benchmarks.py), [`nyx/domains/investing`](nyx/domains/investing) |
 | **Secure AI** | Prompt‑injection guards, secret hygiene, sandboxing | [`nyx/security`](nyx/security) |
 | **Operational Excellence** | Audit ledger, metrics, SRE agent | [`nyx/observability`](nyx/observability) |
 | **Ollama Cloud brain** | One config, any frontier‑class cloud model | [`nyx/providers/ollama_cloud.py`](nyx/providers/ollama_cloud.py) |
@@ -154,6 +155,7 @@ one‑shot installer [`scripts/setup-windows11.ps1`](scripts/setup-windows11.ps1
 - [Architecture](docs/ARCHITECTURE.md) — how the swarm is wired
 - [Constitution](constitution/constitution.yaml) — the DNA
 - [Security model](docs/SECURITY.md) — secure‑AI guarantees
+- [Capabilities](docs/CAPABILITIES.md) — pluggable goal-specific autonomy (e.g. value investing)
 - [Evolution](docs/EVOLUTION.md) — how agents improve themselves
 - [Memory & learning](docs/MEMORY.md) — how the factory remembers and gets wiser
 - [Tools, MCP & web access](docs/TOOLS.md) — equipping NYX with EDGAR/MCP/scraping

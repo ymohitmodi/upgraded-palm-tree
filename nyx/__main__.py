@@ -60,8 +60,8 @@ def cmd_build(args) -> int:
 
 
 def cmd_run(args) -> int:
-    """Autonomous mission: plan -> build -> evolve -> adopt -> repeat."""
-    from .mission import MissionControl
+    """Autonomous run: pick the matching capability, then plan→learn→decide→evolve→repeat."""
+    from .capabilities import CapabilityRunner, select_for
 
     cfg = load_config()
     if args.autonomy:
@@ -69,6 +69,25 @@ def cmd_run(args) -> int:
     if args.fanout:
         cfg.fanout = args.fanout
     print(_banner(cfg) + "\n")
+
+    cap = select_for(args.objective)
+    # A non-software capability (e.g. value-investing) runs via the generic runner.
+    if cap is not None and cap.name != "software":
+        print(f"capability: {cap.name} — {cap.description}\n")
+        runner = CapabilityRunner(cap, config=cfg)
+        report = runner.run(
+            args.objective,
+            max_cycles=args.max_cycles or 6,
+            evolve_every=args.evolve_every,
+            generations=args.generations,
+            keep_going=args.keep_going,
+        )
+        print("\n" + report.summary())
+        return 0
+
+    # Default: the software dark-factory mission.
+    from .mission import MissionControl
+
     control = MissionControl(config=cfg, evolve_role=args.evolve_role)
     report = control.run(
         args.objective,
@@ -79,6 +98,20 @@ def cmd_run(args) -> int:
         autonomy=args.autonomy,
     )
     print("\n" + report.summary())
+    return 0
+
+
+def cmd_capabilities(args) -> int:
+    """List the goal-specific capabilities NYX can pursue."""
+    from .capabilities import all_capabilities, select_for
+
+    select_for("")  # trigger registration of built-ins
+    print("Registered capabilities:")
+    for cap in all_capabilities():
+        print(f"  - {cap.name:16s} {cap.description}")
+    if args.objective:
+        chosen = select_for(args.objective)
+        print(f"\nObjective would route to: {chosen.name if chosen else '(none)'}")
     return 0
 
 
@@ -371,6 +404,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     bt = sub.add_parser("backtest", help="backtest the analyst genome (value suite)")
     bt.set_defaults(func=cmd_backtest)
+
+    cp = sub.add_parser("capabilities", help="list pluggable goal capabilities")
+    cp.add_argument("objective", nargs="?", help="optional: show which capability handles it")
+    cp.set_defaults(func=cmd_capabilities)
 
     tl = sub.add_parser("tools", help="list available tools / MCP servers")
     tl.set_defaults(func=cmd_tools)
