@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,6 +81,7 @@ class WebFetcher:
         self.rate_limit = rate_limit_seconds
         self.transport = transport or _default_transport
         self._last_hit: dict[str, float] = {}
+        self._lock = threading.Lock()
 
     def _allowed(self, url: str) -> bool:
         if not self.allowed:
@@ -102,13 +104,15 @@ class WebFetcher:
             d = json.loads(cpath.read_text(encoding="utf-8"))
             return Document(url=d["url"], status=d["status"], text=d["text"], from_cache=True)
 
-        # Per-host rate limit (polite).
+        # Per-host rate limit (polite; lock-protected for concurrent crawls —
+        # the slot is claimed inside the lock so parallel workers queue up).
         host = urlparse(url).hostname or ""
-        wait = self.rate_limit - (time.time() - self._last_hit.get(host, 0.0))
+        with self._lock:
+            wait = self.rate_limit - (time.time() - self._last_hit.get(host, 0.0))
+            self._last_hit[host] = time.time() + max(0.0, wait)
         if wait > 0:
             time.sleep(wait)
         status, body, final_url = self.transport(url, {"User-Agent": self.user_agent})
-        self._last_hit[host] = time.time()
 
         raw = body.decode("utf-8", errors="replace")
         text = html_to_text(raw) if (as_text and "<" in raw[:2000]) else raw
@@ -119,6 +123,23 @@ class WebFetcher:
                 json.dumps({"url": final_url, "status": status, "text": text}), encoding="utf-8"
             )
         return Document(url=final_url, status=status, text=text)
+
+    def crawl(self, urls: list[str], *, max_workers: int = 8,
+              refresh: bool = False) -> list[Document]:
+        """Fetch many URLs concurrently (scalable mode). Per-host politeness is
+        preserved — the rate limiter is shared and lock-protected — while
+        different hosts proceed in parallel. Failures become status=0 docs so
+        one bad URL never sinks the batch."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        def one(url: str) -> Document:
+            try:
+                return self.fetch(url, refresh=refresh)
+            except Exception as exc:  # noqa: BLE001 — batch must survive
+                return Document(url=url, status=0, text=f"[crawl error] {exc}")
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            return list(pool.map(one, urls))
 
     # -- as a tool ----------------------------------------------------------
     def as_tool_func(self):

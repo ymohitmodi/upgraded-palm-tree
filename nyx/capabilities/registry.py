@@ -49,7 +49,8 @@ def _ensure_builtin() -> None:
     """Register built-ins that aren't already present (idempotent, never
     suppressed by earlier custom registrations)."""
     from ..domains.investing.capability import ValueInvestingCapability
+    from .advisor import AdvisorCapability
     from .software import SoftwareFactoryCapability
 
-    for cls in (SoftwareFactoryCapability, ValueInvestingCapability):
+    for cls in (SoftwareFactoryCapability, ValueInvestingCapability, AdvisorCapability):
         _REGISTRY.setdefault(cls.name, cls)

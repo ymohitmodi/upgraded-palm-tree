@@ -61,7 +61,7 @@ def cmd_build(args) -> int:
 
 def cmd_run(args) -> int:
     """Autonomous run: pick the matching capability, then plan→learn→decide→evolve→repeat."""
-    from .capabilities import CapabilityRunner, select_for
+    from .capabilities import CapabilityRunner
 
     cfg = load_config()
     if args.autonomy:
@@ -70,32 +70,21 @@ def cmd_run(args) -> int:
         cfg.fanout = args.fanout
     print(_banner(cfg) + "\n")
 
-    cap = select_for(args.objective)
-    # A non-software capability (e.g. value-investing) runs via the generic runner.
-    if cap is not None and cap.name != "software":
-        print(f"capability: {cap.name} — {cap.description}\n")
-        runner = CapabilityRunner(cap, config=cfg)
-        report = runner.run(
-            args.objective,
-            max_cycles=args.max_cycles or 6,
-            evolve_every=args.evolve_every,
-            generations=args.generations,
-            keep_going=args.keep_going,
-        )
-        print("\n" + report.summary())
-        return 0
+    # ONE loop for every goal: route semantically (LLM when live, keyword
+    # fallback offline), then drive the capability through the generic runner.
+    from .capabilities.router import route
+    from .providers import build_provider
 
-    # Default: the software dark-factory mission.
-    from .mission import MissionControl
-
-    control = MissionControl(config=cfg, evolve_role=args.evolve_role)
-    report = control.run(
+    provider = build_provider(cfg)
+    cap = route(args.objective, cfg, provider)
+    print(f"capability: {cap.name} — {cap.description}\n")
+    runner = CapabilityRunner(cap, config=cfg, provider=provider)
+    report = runner.run(
         args.objective,
-        max_cycles=args.max_cycles,
+        max_cycles=args.max_cycles or 6,
         evolve_every=args.evolve_every,
         generations=args.generations,
         keep_going=args.keep_going,
-        autonomy=args.autonomy,
     )
     print("\n" + report.summary())
     return 0
@@ -243,6 +232,35 @@ def cmd_tools(args) -> int:
     print(f"\nWeb: UA={cfg.user_agent!r}  cache={cfg.web_cache_dir}  "
           f"allowlist={list(cfg.allowed_domains) or 'ALL'}")
     print(f"EDGAR identity set: {bool(cfg.edgar_identity)}  | MCP manifest: {cfg.mcp_manifest}")
+    return 0
+
+
+def cmd_mcp_init(args) -> int:
+    """Write a starter MCP manifest registering the SEC EDGAR server."""
+    from .tools.mcp import write_sample_manifest
+
+    cfg = load_config()
+    identity = cfg.edgar_identity or "Your Name your.email@example.com"
+    path = write_sample_manifest(cfg.mcp_manifest, identity=identity)
+    print(f"Wrote MCP manifest: {path}")
+    print("Registered: edgar (python -m edgar.ai). Install with: "
+          "pip install -e '.[investing]' and set EDGAR_IDENTITY.")
+    print("Add more servers by editing the file (Claude Desktop mcpServers shape).")
+    return 0
+
+
+def cmd_skills(args) -> int:
+    """Sync markdown skills from .nyx/skills/ into long-term memory."""
+    from .memory import MemoryStore
+    from .skills import sync_skills
+
+    cfg = load_config()
+    store = MemoryStore(cfg.memory_path)
+    n = sync_skills(store, args.dir)
+    print(f"Synced {n} skills from {args.dir} into long-term memory "
+          f"({len(store)} lessons total).")
+    if n == 0:
+        print("Drop markdown playbooks into that directory and re-run.")
     return 0
 
 
@@ -425,6 +443,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     tl = sub.add_parser("tools", help="list available tools / MCP servers")
     tl.set_defaults(func=cmd_tools)
+
+    mi = sub.add_parser("mcp-init", help="write a starter MCP manifest (SEC EDGAR)")
+    mi.set_defaults(func=cmd_mcp_init)
+
+    sk = sub.add_parser("skills", help="sync markdown skills into long-term memory")
+    sk.add_argument("--dir", default=".nyx/skills")
+    sk.set_defaults(func=cmd_skills)
 
     isp = sub.add_parser("ingest-solopreneur",
                          help="seed solopreneur business doctrine into long-term memory")

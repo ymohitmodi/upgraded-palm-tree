@@ -24,6 +24,22 @@ def build_toolbox(config: Config, ledger: AuditLedger | None = None) -> ToolRegi
         "Fetch a URL and return readable text (cached, rate-limited, allowlisted).",
         fetcher.as_tool_func(), {"url": "http(s) URL", "refresh": "bypass cache"},
     )
+
+    def web_crawl(urls: list[str], max_workers: int = 8):
+        docs = fetcher.crawl(list(urls), max_workers=max_workers)
+        ok = [d for d in docs if 200 <= d.status < 300]
+        return ToolResult(
+            ok=bool(ok),
+            data="\n\n".join(f"=== {d.url} ===\n{d.text[:2000]}" for d in ok),
+            error="" if ok else "no URLs fetched successfully",
+            meta={"requested": len(urls), "fetched": len(ok)},
+        )
+
+    registry.add(
+        "web_crawl",
+        "Fetch MANY URLs concurrently (scalable crawl; per-host rate limits preserved).",
+        web_crawl, {"urls": "list of http(s) URLs", "max_workers": "parallelism (default 8)"},
+    )
     register_edgar_tools(registry, identity=config.edgar_identity)
     register_mcp_servers(registry, config.mcp_manifest)
     return registry

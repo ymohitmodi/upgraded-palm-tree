@@ -105,7 +105,20 @@ class AnalystAgent(Agent):
     )
 
 
+class AdvisorAgent(Agent):
+    default_model_role = "architect"
+    charter = (
+        "You are the Advisor — a strategist for ambiguous, high-stakes personal and "
+        "business goals (careers, immigration cases, research, growth). For each task "
+        "produce a CONCRETE deliverable: a prioritized plan with measurable milestones, "
+        "drafts/artifacts where applicable, risks with mitigations, and the single next "
+        "action. Ground every claim; never fabricate credentials, citations, or numbers. "
+        "Apply lessons from memory and say explicitly which you applied."
+    )
+
+
 ROLE_REGISTRY: dict[str, type[Agent]] = {
+    "advisor": AdvisorAgent,
     "planner": PlannerAgent,
     "explorer": ExplorerAgent,
     "architect": ArchitectAgent,

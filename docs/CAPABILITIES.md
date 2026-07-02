@@ -74,6 +74,35 @@ To run on real data:
    by default; a mini-PC deployment has open internet.)
 3. `nyx run "<objective>"` — same command, now reading real filings and prices.
 
+## Built-in: `advisor` — ambiguous personal/professional goals
+
+For goals with no code to ship and no ticker to score: *"grow my senior SDE
+career"*, *"get EB-1 publications ready"*, research agendas. The planner
+decomposes the objective, the **Advisor agent** produces a concrete gated
+deliverable per cycle (prioritized plan, drafts, evidence checklist, next
+action), and reflection banks what worked. Seeds career + EB-1A doctrine into
+long-term memory (`nyx/domains/career.py`).
+
+## LLM routing — no rule-based dispatch
+
+With a live Ollama Cloud brain, `nyx run` routes the objective to a capability
+**semantically** (`nyx/capabilities/router.py` asks the model to choose from the
+registry). Keyword `matches()` heuristics are only the deterministic fallback
+for offline/MOCK mode and parse failures. All objectives now flow through ONE
+loop — the `CapabilityRunner`.
+
+## Tools at its disposal
+
+- `nyx mcp-init` — writes `.nyx/mcp.json` registering the SEC EDGAR MCP server
+  (edit to add any other MCP server; Claude Desktop shape).
+- `web_fetch` / **`web_crawl`** — single fetch or scalable concurrent crawl
+  (thread-pooled, per-host rate limits preserved, cache shared).
+- `nyx skills` — drop markdown playbooks into `.nyx/skills/` and sync them into
+  long-term memory as `skill` lessons; recall injects the relevant playbook into
+  whichever agent is working a related task.
+- Doctrine packs: `nyx ingest-solopreneur`, `nyx ingest-buffett`, career/EB-1
+  (seeded automatically by the advisor).
+
 ## Adding your own capability
 
 Drop a class implementing `Capability` (e.g. legal research, biotech screening),
