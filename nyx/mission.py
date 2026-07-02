@@ -244,7 +244,8 @@ class MissionControl:
 
         # A final consolidation pass at the end of the mission.
         self._consolidate(report)
-        report.genome_score_after = self._adopt_from_archive() or report.genome_score_before
+        after = self._adopt_from_archive()  # `is None`: a real 0.0 score is falsy
+        report.genome_score_after = after if after is not None else report.genome_score_before
         report.calls = self.metrics.calls
         report.lessons = len(self.memory)
         report.long_term_lessons = self.memory.stats()["long_term"]

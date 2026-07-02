@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -95,18 +96,34 @@ class MCPClient:
         if self._proc:
             self._proc.terminate()
 
+    def _readline(self, deadline: float) -> str:  # pragma: no cover - live only
+        """Read one stdout line, enforcing the client timeout (POSIX select)."""
+        import select
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"MCP server '{self.spec.name}' timed out")
+        ready, _, _ = select.select([self._proc.stdout], [], [], remaining)
+        if not ready:
+            self._proc.terminate()
+            raise TimeoutError(f"MCP server '{self.spec.name}' timed out after {self.timeout}s")
+        return self._proc.stdout.readline()
+
     def _rpc(self, method: str, params: dict) -> dict:  # pragma: no cover - live only
         self._id += 1
         msg = {"jsonrpc": "2.0", "id": self._id, "method": method, "params": params}
         self._proc.stdin.write(json.dumps(msg) + "\n")
         self._proc.stdin.flush()
-        for line in self._proc.stdout:
+        deadline = time.monotonic() + self.timeout
+        while True:
+            line = self._readline(deadline)
+            if not line:
+                raise RuntimeError("MCP server closed without responding")
             resp = json.loads(line)
             if resp.get("id") == self._id:
                 if "error" in resp:
                     raise RuntimeError(resp["error"])
                 return resp.get("result", {})
-        raise RuntimeError("MCP server closed without responding")
 
     def _notify(self, method: str, params: dict) -> None:  # pragma: no cover - live only
         self._proc.stdin.write(json.dumps(

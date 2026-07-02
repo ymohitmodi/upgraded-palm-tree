@@ -116,11 +116,15 @@ def genome_factor_weights(genome: Genome | None) -> dict:
     # *learned* (or seeded), and emphasis differs as evolution accumulates it.
     base = {"mos": 0.0, "roic": 0.0, "debt": 0.0, "oey": 0.0}
     text = (genome.system_prompt.lower() if genome else "")
-    base["mos"] += 1.5 * (text.count("margin of safety") + text.count("intrinsic"))
-    base["roic"] += 1.5 * (text.count("roic") + text.count("moat") + text.count("quality"))
-    base["debt"] += 1.5 * (text.count("debt") + text.count("leverage") + text.count("footnote"))
-    base["oey"] += 1.5 * (text.count("owner-earnings") + text.count("owner earnings")
-                          + text.count("distributable cash"))
+    # Counts are CAPPED so evolution cannot reward-hack by stuffing the same
+    # keyword-bearing directive repeatedly — emphasis saturates at 2 mentions.
+    def hits(*terms: str) -> float:
+        return min(sum(text.count(t) for t in terms), 2)
+
+    base["mos"] += 1.5 * hits("margin of safety", "intrinsic")
+    base["roic"] += 1.5 * hits("roic", "moat", "quality")
+    base["debt"] += 1.5 * hits("debt", "leverage", "footnote")
+    base["oey"] += 1.5 * hits("owner-earnings", "owner earnings", "distributable cash")
     return base
 
 

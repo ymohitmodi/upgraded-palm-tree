@@ -135,7 +135,7 @@ class Constitution:
             "remove or weaken an immutable": [r"(remove|delete|weaken).*(immutable|core principle)"],
             "fabricated results": [r"(fake|fabricat|pretend).*(test|result|pass)"],
             "guarantee investment returns": [
-                r"\b(guarantee[d]?|risk[\s-]?free|no risk)\b.*\b(return|profit|gain|money)\b"],
+                r"\b(guarantee[d]?|risk[\s-]?free|can'?t lose|no risk)\b.*\b(return|profit|gain|money)\b"],
             "fabricate financial figures": [
                 r"(made[\s-]?up|fabricat|invent).*(number|figure|financial)"],
         }

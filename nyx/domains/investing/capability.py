@@ -22,9 +22,11 @@ from ...capabilities.base import Capability, CycleContext, CycleResult
 DEFAULT_TICKERS = ["AAPL", "MSFT", "BRK-B", "KO", "JNJ", "PG", "WMT", "XOM",
                    "JPM", "UNH", "HD", "PEP", "CVX", "ABBV", "MRK", "COST"]
 
+# Leading \b only: alternatives are stems ("undervalu", "stock") that must match
+# inflected forms ("undervalued", "stocks") — a trailing \b would reject those.
 _MATCH = re.compile(
-    r"\b(invest|value|undervalu|deep[\s-]?value|stock|equit|compan|sec\b|edgar|"
-    r"buffett|berkshire|annualized return|margin of safety)\b", re.IGNORECASE)
+    r"\b(invest|undervalu|deep[\s-]?value|stock|equit|sec\b|edgar|"
+    r"buffett|berkshire|annualized return|margin of safety)", re.IGNORECASE)
 
 
 class ValueInvestingCapability(Capability):

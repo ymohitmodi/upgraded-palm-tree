@@ -246,6 +246,20 @@ def cmd_tools(args) -> int:
     return 0
 
 
+def cmd_ingest_solopreneur(args) -> int:
+    """Seed solopreneur business doctrine into long-term memory."""
+    from .domains.solopreneur import seed_principles
+    from .memory import MemoryStore
+
+    cfg = load_config()
+    store = MemoryStore(cfg.memory_path)
+    n = seed_principles(store)
+    print(f"Seeded {n} solopreneur principles into long-term memory.")
+    print("Every plan/build now recalls business doctrine (distribution, pricing, "
+          "validation, retention) alongside engineering lessons.")
+    return 0
+
+
 def cmd_ingest_buffett(args) -> int:
     """Seed Buffett doctrine into long-term memory (and optionally fetch letters)."""
     from .domains.investing import fetch_letters, seed_principles
@@ -411,6 +425,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     tl = sub.add_parser("tools", help="list available tools / MCP servers")
     tl.set_defaults(func=cmd_tools)
+
+    isp = sub.add_parser("ingest-solopreneur",
+                         help="seed solopreneur business doctrine into long-term memory")
+    isp.set_defaults(func=cmd_ingest_solopreneur)
 
     ib = sub.add_parser("ingest-buffett", help="seed Buffett doctrine into long-term memory")
     ib.add_argument("--fetch", action="store_true", help="also fetch Berkshire letters (needs network)")

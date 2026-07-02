@@ -194,7 +194,11 @@ class MemoryStore:
                     continue
                 theme_members.setdefault(t, []).append(lesson)
 
+        absorbed: set[str] = set()
         for theme, members in theme_members.items():
+            # A lesson joins at most ONE principle per pass (multi-tag lessons
+            # must not be double-counted into several themes).
+            members = [m for m in members if m.id not in absorbed]
             if len(members) < cluster_min:
                 continue
             members.sort(key=lambda x: x.weight, reverse=True)
@@ -208,9 +212,12 @@ class MemoryStore:
                 uses=sum(m.uses for m in members), last_used=now,
             )
             consolidated += 1
-            # The specifics are absorbed into the principle; drop them.
+            # Absorb the specifics: keep the records (they may still be recalled
+            # individually) but fade them so the principle dominates; unused ones
+            # are forgotten by later decay instead of being hard-deleted.
             for m in members:
-                self.lessons.pop(m.id, None)
+                absorbed.add(m.id)
+                m.weight = round(m.weight * 0.4, 4)
 
         # 3. Promote heavily-used short-term lessons to long-term.
         for lesson in self.lessons.values():

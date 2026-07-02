@@ -80,6 +80,12 @@ def fetch_letters(fetcher, memory, *, start: int = 1977, end: int = 2024, excerp
             if not (200 <= doc.status < 300) or not doc.text.strip():
                 skipped += 1
                 continue
+            # Guard: PDFs (years >= 1998) decode to mojibake, not prose — never
+            # store binary garbage as a long-term memory.
+            body = doc.text.lstrip()
+            if body.startswith("%PDF") or doc.text.count("�") > max(20, len(doc.text) // 20):
+                skipped += 1
+                continue
             text = f"Berkshire {year} shareholder letter (source: {url}): {doc.text[:excerpt]}"
             lesson = memory.remember(text, kind="principle",
                                      tags=["buffett", "letter", str(year)], source=url, weight=1.5)

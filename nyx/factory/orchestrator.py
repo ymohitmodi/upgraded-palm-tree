@@ -128,15 +128,20 @@ class Factory:
         budget = self.config.context_char_budget
         if budget <= 0 or len(text) <= budget:
             return text
-        lines = text.splitlines()
+        # Cut on line boundaries so code fences and sentences survive intact.
+        head = text[: budget // 2]
+        head = head[: head.rfind("\n")] if "\n" in head else head
+        tail = text[-(budget // 4):]
+        tail = tail[tail.find("\n") + 1:] if "\n" in tail else tail
+
         salient_kw = ("must", "gate", "block", "valid", "def ", "class ", "error",
                       "security", "requirement", "accept", "test")
-        salient = [ln for ln in lines if any(k in ln.lower() for k in salient_kw)]
-        head = text[: budget // 2]
-        tail = text[-budget // 4:]
+        middle = text[len(head): len(text) - len(tail)]
+        salient = [ln for ln in middle.splitlines()  # only lines the cut would lose
+                   if any(k in ln.lower() for k in salient_kw)]
         keep = "\n".join(salient)[: budget // 4]
         compacted = f"{head}\n…[context compacted]…\n{keep}\n…\n{tail}"
-        return compacted[: budget + 200]
+        return compacted[:budget]  # never exceed the stated working-memory budget
 
     # -- run -----------------------------------------------------------------
     def build(self, intent: str, approver: Approver | None = None) -> FactoryResult:

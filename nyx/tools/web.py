@@ -112,9 +112,12 @@ class WebFetcher:
 
         raw = body.decode("utf-8", errors="replace")
         text = html_to_text(raw) if (as_text and "<" in raw[:2000]) else raw
-        cpath.write_text(
-            json.dumps({"url": final_url, "status": status, "text": text}), encoding="utf-8"
-        )
+        # Only cache successful responses — a transient 4xx/5xx must not poison
+        # the cache and mask the source forever.
+        if 200 <= status < 300:
+            cpath.write_text(
+                json.dumps({"url": final_url, "status": status, "text": text}), encoding="utf-8"
+            )
         return Document(url=final_url, status=status, text=text)
 
     # -- as a tool ----------------------------------------------------------

@@ -151,7 +151,8 @@ class CapabilityRunner:
 
             self.ledger.append("capability", "decision",
                                rationale=f"{item[:60]} -> ok={result.ok} score={result.score}",
-                               decision="PASS" if result.ok else "BLOCK")
+                               decision="PASS" if result.ok else "BLOCK",
+                               data={"summary": result.summary[:400]})
 
             # Evolve the doctrine against the capability's benchmark.
             if evolve_every and idx % evolve_every == 0 and self.budget_left > 0:
@@ -169,7 +170,8 @@ class CapabilityRunner:
                 backlog = self.cap.plan(f"{objective} (continue)", ctx)
 
         self.memory.consolidate()
-        report.genome_score_after = self._adopt() or report.genome_score_before
+        after = self._adopt()  # `is None` check: a legitimate 0.0 score is falsy
+        report.genome_score_after = after if after is not None else report.genome_score_before
         report.calls = self.metrics.calls
         report.lessons = len(self.memory)
         report.long_term_lessons = self.memory.stats()["long_term"]

@@ -32,8 +32,16 @@ class SoftwareFactoryCapability(Capability):
                 items.append(m.group(1).strip())
         return items or [f"{objective} — milestone {i + 1}" for i in range(3)]
 
+    def seed_memory(self, memory) -> int:
+        """Seed the solopreneur business doctrine so the factory prioritizes
+        like a successful one-person company, not just an engineering pipeline."""
+        from ..domains.solopreneur import seed_principles
+
+        return seed_principles(memory)
+
     def execute(self, task: str, ctx: CycleContext) -> CycleResult:
-        factory = Factory(config=ctx.config, constitution=ctx.constitution, ledger=ctx.ledger,
+        factory = Factory(config=ctx.config, provider=ctx.provider,
+                          constitution=ctx.constitution, ledger=ctx.ledger,
                           metrics=ctx.metrics, genomes=ctx.genomes, memory=ctx.memory)
         r = factory.build(task, approver=lambda *_: ctx.config.autonomy == "autonomous")
         return CycleResult(

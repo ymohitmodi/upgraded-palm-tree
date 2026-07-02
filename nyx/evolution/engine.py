@@ -115,10 +115,15 @@ class EvolutionEngine:
         elif op == "model_role":
             choices = ["coder", "architect", "reviewer", "fast"]
             child = genome.mutate(model_role=self.rng.choice(choices))
-        else:  # directive: append an improvement to the charter
-            directive = self.rng.choice(self.directive_pool)
-            sep = "" if genome.system_prompt.endswith("\n") else "\n"
-            child = genome.mutate(system_prompt=genome.system_prompt + sep + directive)
+        else:  # directive: append an improvement to the charter (never twice —
+            # repeated grafts would just bloat the prompt / game keyword scoring)
+            fresh = [d for d in self.directive_pool if d not in genome.system_prompt]
+            if fresh:
+                directive = self.rng.choice(fresh)
+                sep = "" if genome.system_prompt.endswith("\n") else "\n"
+                child = genome.mutate(system_prompt=genome.system_prompt + sep + directive)
+            else:  # pool exhausted: fall back to a parameter tweak
+                child = genome.mutate(temperature=min(0.95, round(genome.temperature + 0.05, 2)))
         child.lineage = list(genome.lineage) + [_genome_id(genome)]
         return child
 
