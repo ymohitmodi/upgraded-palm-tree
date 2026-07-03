@@ -87,8 +87,19 @@ class ToolRegistry:
         self._allowed: set[str] | None = None   # None = all tools permitted
 
     def set_allowed(self, names) -> None:
-        """Restrict callable tools to ``names`` (least privilege). None = all."""
+        """Restrict callable tools to ``names`` (least privilege). None = all.
+
+        An entry ending in ``*`` is a prefix wildcard, so a capability can grant
+        every dynamically-registered MCP tool with ``"mcp.*"`` without naming
+        each server."""
         self._allowed = set(names) if names is not None else None
+
+    def _permitted(self, name: str) -> bool:
+        if self._allowed is None:
+            return True
+        if name in self._allowed:
+            return True
+        return any(a.endswith("*") and name.startswith(a[:-1]) for a in self._allowed)
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
@@ -120,7 +131,7 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if tool is None:
             return ToolResult(ok=False, error=f"unknown tool: {name}")
-        if self._allowed is not None and name not in self._allowed:
+        if not self._permitted(name):
             if self.ledger is not None:
                 self.ledger.append("tools", f"deny:{name}",
                                    rationale="tool not permitted for this capability",

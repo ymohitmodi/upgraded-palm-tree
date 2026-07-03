@@ -71,3 +71,20 @@ def test_tool_allowlist_denies_unpermitted_tools():
     assert not denied.ok and "not permitted" in denied.error
     reg.set_allowed(None)                       # None restores full access
     assert reg.call("edgar_facts", ticker="AAPL").ok
+
+
+def test_tool_allowlist_supports_mcp_prefix_wildcard():
+    reg = ToolRegistry()
+    reg.add("mcp.sec-edgar-mcp", "sec", lambda tool, arguments=None: ToolResult(ok=True, data=tool))
+    reg.add("web_fetch", "fetch", lambda url: ToolResult(ok=True, data=url))
+    reg.set_allowed({"web_fetch", "mcp.*"})     # any configured MCP server
+    assert reg.call("mcp.sec-edgar-mcp", tool="get_financials").ok
+    reg.add("shell", "danger", lambda: ToolResult(ok=True, data="x"))
+    assert not reg.call("shell").ok             # not matched by mcp.* or web_fetch
+
+
+def test_investing_capability_grants_mcp_tools():
+    from nyx.domains.investing.capability import ValueInvestingCapability
+
+    allowed = ValueInvestingCapability().allowed_tools()
+    assert "mcp.*" in allowed and "edgar_facts" in allowed

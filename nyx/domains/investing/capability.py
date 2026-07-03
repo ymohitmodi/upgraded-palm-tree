@@ -43,8 +43,10 @@ class ValueInvestingCapability(Capability):
 
     def allowed_tools(self) -> set[str]:
         # The investor reads filings and the web; it never needs anything else.
+        # Built-in filing/web tools + any configured MCP server (e.g.
+        # mcp.sec-edgar-mcp) via the prefix wildcard — nothing else.
         return {"web_fetch", "web_crawl", "read_url",
-                "edgar_financials", "edgar_filings", "edgar_facts"}
+                "edgar_financials", "edgar_filings", "edgar_facts", "mcp.*"}
 
     def evolve_role(self) -> str:
         return "analyst"

@@ -163,10 +163,16 @@ def register_mcp_servers(registry: ToolRegistry, manifest_path: str | Path) -> l
                     return client.call_tool(tool, arguments or {})
             return mcp_call
 
+        from .registry import ArgSpec
+
         registry.add(
             f"mcp.{spec.name}",
-            f"Call a tool on the '{spec.name}' MCP server ({spec.command} {' '.join(spec.args)}).",
-            _make(spec), {"tool": "tool name on the server", "arguments": "dict of args"},
+            f"Call a tool on the '{spec.name}' MCP server (e.g. sec-edgar-mcp: "
+            "filings, XBRL financials, Form 3/4/5 insider trading).",
+            _make(spec),
+            {"tool": ArgSpec("tool name on the server", str, required=True, max_len=128),
+             "arguments": ArgSpec("dict of args for that tool", dict)},
+            external=True,   # MCP output is untrusted → injection-classified
         )
         registered.append(spec.name)
     return registered
