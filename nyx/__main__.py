@@ -235,6 +235,35 @@ def cmd_tools(args) -> int:
     return 0
 
 
+def cmd_read(args) -> int:
+    """Read a long document (URL or file) end-to-end without overflowing context."""
+    from pathlib import Path
+
+    from .context import LongDocReader
+    from .providers import build_provider
+
+    cfg = load_config()
+    src = args.source
+    if src.startswith(("http://", "https://")):
+        from .tools import WebFetcher
+
+        doc = WebFetcher(cache_dir=cfg.web_cache_dir, user_agent=cfg.user_agent,
+                         allowed_domains=cfg.allowed_domains).fetch(src)
+        text = doc.text
+    else:
+        text = Path(src).read_text(encoding="utf-8", errors="replace")
+
+    digest = LongDocReader(cfg, build_provider(cfg)).read(text, source=src)
+    print(f"Read {src} in {digest.n_chunks} chunks (nothing truncated).\n")
+    print("=== whole-document synthesis ===")
+    print(digest.synthesis)
+    if args.query:
+        print(f"\n=== sections relevant to: {args.query!r} ===")
+        for i, sec in enumerate(digest.retrieve(args.query), 1):
+            print(f"\n[{i}] {sec[:600]}")
+    return 0
+
+
 def cmd_mcp_init(args) -> int:
     """Write a starter MCP manifest registering the SEC EDGAR server."""
     from .tools.mcp import write_sample_manifest
@@ -444,6 +473,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     tl = sub.add_parser("tools", help="list available tools / MCP servers")
     tl.set_defaults(func=cmd_tools)
+
+    rd = sub.add_parser("read", help="read a long document (URL/file) without losing context")
+    rd.add_argument("source", help="http(s) URL or local file path")
+    rd.add_argument("--query", help="optional question to retrieve specific sections")
+    rd.set_defaults(func=cmd_read)
 
     mi = sub.add_parser("mcp-init", help="write a starter MCP manifest (SEC EDGAR)")
     mi.set_defaults(func=cmd_mcp_init)

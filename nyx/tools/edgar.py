@@ -58,9 +58,14 @@ def register_edgar_tools(registry: ToolRegistry, *, identity: str = "") -> None:
         facts = edgar.Company(ticker).get_facts()
         return ToolResult(ok=True, data={"ticker": ticker.upper(), "facts": str(facts)})
 
+    from .registry import ArgSpec
+
+    ticker = ArgSpec("ticker symbol", str, required=True, max_len=12, pattern=r"[A-Za-z.\-]{1,12}")
     registry.add("edgar_financials", "SEC XBRL financial statements for a ticker (balance sheet, "
-                 "income, cash flow).", edgar_financials, {"ticker": "e.g. AAPL"})
+                 "income, cash flow).", edgar_financials, {"ticker": ticker}, external=True)
     registry.add("edgar_filings", "List a company's SEC filings by form (10-K, 10-Q, 8-K, 4, 13F-HR).",
-                 edgar_filings, {"ticker": "e.g. MSFT", "form": "filing form", "limit": "max rows"})
+                 edgar_filings,
+                 {"ticker": ticker, "form": ArgSpec("filing form", str, max_len=12),
+                  "limit": ArgSpec("max rows", int)}, external=True)
     registry.add("edgar_facts", "All standardized XBRL facts for a ticker (for deep/footnote analysis).",
-                 edgar_facts, {"ticker": "e.g. BRK-B"})
+                 edgar_facts, {"ticker": ticker}, external=True)

@@ -27,7 +27,7 @@ class AdvisorCapability(Capability):
         return bool(_MATCH.search(objective))
 
     def allowed_tools(self) -> set[str]:
-        return {"web_fetch", "web_crawl"}  # research only — no financial credentials
+        return {"web_fetch", "web_crawl", "read_url"}  # research only — no financial creds
 
     def evolve_role(self) -> str:
         return "advisor"

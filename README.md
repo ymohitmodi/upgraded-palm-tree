@@ -158,6 +158,7 @@ one‑shot installer [`scripts/setup-windows11.ps1`](scripts/setup-windows11.ps1
 - [Capabilities](docs/CAPABILITIES.md) — pluggable goal-specific autonomy (e.g. value investing)
 - [Evolution](docs/EVOLUTION.md) — how agents improve themselves
 - [Memory & learning](docs/MEMORY.md) — how the factory remembers and gets wiser
+- [Context management](docs/CONTEXT.md) — reading full 10-Ks without overflow
 - [Tools, MCP & web access](docs/TOOLS.md) — equipping NYX with EDGAR/MCP/scraping
 - [Windows 11 deployment](docs/DEPLOYMENT_WINDOWS11.md)
 

@@ -43,7 +43,8 @@ class ValueInvestingCapability(Capability):
 
     def allowed_tools(self) -> set[str]:
         # The investor reads filings and the web; it never needs anything else.
-        return {"web_fetch", "web_crawl", "edgar_financials", "edgar_filings", "edgar_facts"}
+        return {"web_fetch", "web_crawl", "read_url",
+                "edgar_financials", "edgar_filings", "edgar_facts"}
 
     def evolve_role(self) -> str:
         return "analyst"

@@ -74,7 +74,7 @@ class CapabilityRunner:
         self.metrics = Metrics()
         base = Constitution.load(self.config.constitution_path, mode=self.config.constitution_mode)
         self.constitution = self.cap.constitution(base)
-        self.toolbox = build_toolbox(self.config, ledger=self.ledger)
+        self.toolbox = build_toolbox(self.config, ledger=self.ledger, provider=self.provider)
         self.toolbox.set_allowed(self.cap.allowed_tools())  # least privilege per capability
         self.genomes: dict = {}
 
