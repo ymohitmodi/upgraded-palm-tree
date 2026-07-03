@@ -29,6 +29,10 @@ nyx = "nyx.__main__:main"
 [tool.setuptools.packages.find]
 include = ["nyx*"]
 
+[tool.setuptools.package-data]
+# Ship the skill packs inside the wheel so `pip install` deployments have them.
+nyx = ["skill_packs/*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

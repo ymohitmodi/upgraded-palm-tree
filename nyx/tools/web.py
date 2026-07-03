@@ -80,24 +80,22 @@ class WebFetcher:
         self.allowed = tuple(d.lower() for d in allowed_domains)
         self.rate_limit = rate_limit_seconds
         self.transport = transport or _default_transport
+        # Resolve DNS for the SSRF guard only on the real network (default
+        # transport); an injected transport (tests/mocks) skips resolution.
+        self._resolve_guard = transport is None
         self._last_hit: dict[str, float] = {}
         self._lock = threading.Lock()
-
-    def _allowed(self, url: str) -> bool:
-        if not self.allowed:
-            return True
-        host = (urlparse(url).hostname or "").lower()
-        return any(host == d or host.endswith("." + d) for d in self.allowed)
 
     def _cache_path(self, url: str) -> Path:
         h = hashlib.sha256(url.encode()).hexdigest()[:20]
         return self.cache / f"{h}.json"
 
     def fetch(self, url: str, *, refresh: bool = False, as_text: bool = True) -> Document:
-        if not url.lower().startswith(("http://", "https://")):
-            raise ValueError(f"unsupported URL scheme: {url}")
-        if not self._allowed(url):
-            raise PermissionError(f"domain not in allowlist: {urlparse(url).hostname}")
+        # SSRF/egress policy: scheme + allowlist + no private/loopback/metadata
+        # addresses. Raises EgressBlocked (a PermissionError) on violation.
+        from ..security.egress import check_url
+
+        check_url(url, self.allowed, resolve=self._resolve_guard)
 
         cpath = self._cache_path(url)
         if cpath.exists() and not refresh:

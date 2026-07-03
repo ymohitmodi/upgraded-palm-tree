@@ -67,11 +67,28 @@ def _lesson_id(text: str, kind: str) -> str:
 class MemoryStore:
     """Persistent semantic memory of distilled lessons (JSONL, dependency-free)."""
 
-    def __init__(self, path: str | Path = ".nyx/memory.jsonl"):
+    def __init__(self, path: str | Path = ".nyx/memory.jsonl", embedder=None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lessons: dict[str, Lesson] = {}
+        # Vector recall: default to the offline hashing embedder; inject a
+        # ProviderEmbedder for true semantic similarity when a brain is live.
+        if embedder is None:
+            from .embeddings import default_embedder
+            embedder = default_embedder()
+        self.embedder = embedder
+        self._vecs: dict[str, list[float]] = {}   # lesson id -> cached vector
         self._load()
+
+    def _vector(self, lesson: Lesson) -> list[float]:
+        vec = self._vecs.get(lesson.id)
+        if vec is None:
+            try:
+                vec = self.embedder.embed(f"{lesson.text} {' '.join(lesson.tags)}")
+            except Exception:  # noqa: BLE001 — embedding must never break recall
+                vec = []
+            self._vecs[lesson.id] = vec
+        return vec
 
     def _load(self) -> None:
         if not self.path.exists():
@@ -108,24 +125,38 @@ class MemoryStore:
             self.lessons[lid] = Lesson(
                 id=lid, text=text, kind=kind, tags=tags or [], source=source, weight=weight
             )
+        self._vecs.pop(lid, None)  # invalidate cached vector on write
         self._flush()
         return self.lessons[lid]
 
     def recall(self, query: str, k: int = 5, kind: str | None = None) -> list[Lesson]:
-        """Return the k most relevant lessons for a query (keyword overlap × weight)."""
+        """Return the k most relevant lessons for a query.
+
+        Relevance = cosine similarity in embedding space (semantic), blended with
+        a smaller keyword-overlap term (exact-match precision), then boosted by
+        reinforcement weight and a long-term-memory preference. Falls back to pure
+        keyword overlap if embedding is unavailable.
+        """
+        from .embeddings import cosine
+
         q = _tokens(query)
         if not q:
             return []
+        try:
+            qvec = self.embedder.embed(query)
+        except Exception:  # noqa: BLE001
+            qvec = []
         scored: list[tuple[float, Lesson]] = []
         for lesson in self.lessons.values():
             if kind and lesson.kind != kind:
                 continue
             overlap = q & lesson.tokenset()
-            if not overlap:
+            sim = cosine(qvec, self._vector(lesson)) if qvec else 0.0
+            # Require *some* signal from either channel to be a candidate.
+            if sim <= 0.0 and not overlap:
                 continue
-            # Jaccard-ish relevance, boosted by reinforcement weight, with a
-            # preference for consolidated long-term memories (more general/proven).
-            rel = len(overlap) / len(q | lesson.tokenset())
+            lexical = len(overlap) / len(q | lesson.tokenset()) if overlap else 0.0
+            rel = 0.7 * sim + 0.3 * lexical if qvec else lexical
             tier_boost = 1.5 if lesson.tier == "long_term" else 1.0
             scored.append((rel * lesson.weight * tier_boost, lesson))
         scored.sort(key=lambda x: x[0], reverse=True)

@@ -73,6 +73,13 @@ class Capability(ABC):
         """Domain directive pool for mutation (None = software default)."""
         return None
 
+    def allowed_tools(self) -> set[str] | None:
+        """Least-privilege tool allowlist for this capability (None = all).
+
+        Override to grant a capability only the tools it needs — an advisor has
+        no reason to hold EDGAR credentials, a code factory no reason to crawl."""
+        return None
+
     def benchmark(self, ctx: CycleContext):
         """A fitness benchmark for the EvolutionEngine, or None for the default."""
         return None

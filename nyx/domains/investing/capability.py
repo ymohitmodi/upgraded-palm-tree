@@ -41,6 +41,10 @@ class ValueInvestingCapability(Capability):
     def matches(self, objective: str) -> bool:
         return bool(_MATCH.search(objective))
 
+    def allowed_tools(self) -> set[str]:
+        # The investor reads filings and the web; it never needs anything else.
+        return {"web_fetch", "web_crawl", "edgar_financials", "edgar_filings", "edgar_facts"}
+
     def evolve_role(self) -> str:
         return "analyst"
 

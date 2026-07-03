@@ -48,6 +48,29 @@ NYX is designed against exactly that class of failure.
 Even at `autonomous`, the **forbidden list** and **immutable core principles**
 are always hard blocks. The factory can be fast; it cannot be ungoverned.
 
+## Hardening for tools, network & memory (OWASP LLM Top 10)
+
+As NYX gained web crawling, MCP servers, and live data, the posture was hardened
+to the OWASP Top 10 for LLM Applications — enforced in code:
+
+| Risk | Defense | Where |
+| --- | --- | --- |
+| **LLM07 Insecure tool design** | **Per-capability least-privilege allowlist** — a capability declares `allowed_tools()` and the runner restricts the toolbox; denied calls are logged `tools/deny:*` | [`tools/registry.py`](../nyx/tools/registry.py), `capabilities/*` |
+| **SSRF / egress** | Scheme allowlist + domain allowlist + **resolution guard** blocking loopback / RFC-1918 / link-local / cloud-metadata (`169.254.169.254`) | [`security/egress.py`](../nyx/security/egress.py), [`tools/web.py`](../nyx/tools/web.py) |
+| **LLM07 (MCP)** | MCP client enforces a call **timeout** (a hung server can't freeze the run) | [`tools/mcp.py`](../nyx/tools/mcp.py) |
+| **Data poisoning** | Ingested PDF/web content is validated (mojibake guard) before becoming memory; transient HTTP errors are never cached | [`tools/web.py`](../nyx/tools/web.py) |
+| **Reward hacking** | Evolution can't game the fitness signal by keyword-stuffing (capped weights, no duplicate directive grafts) | [`domains/investing/backtest.py`](../nyx/domains/investing/backtest.py) |
+
+**Least privilege in practice:** the `advisor` capability may crawl the web but
+holds **no** EDGAR credentials; the `value-investing` capability reads filings
+but cannot reach arbitrary tools. **SSRF guard in practice:** on the live network
+the crawler refuses any host that resolves to an internal or cloud-metadata
+address, the standard defense against a poisoned URL exfiltrating credentials.
+
+Honest scope: this is defense-in-depth to a strong current standard, not a proof
+of safety. The injection detector is a heuristic filter; a live LLM injection
+classifier and per-tool argument schemas are the next hardening step.
+
 ## Responsible use
 
 NYX is built for *authorized* product development and operations. The

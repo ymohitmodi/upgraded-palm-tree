@@ -17,7 +17,13 @@ from pathlib import Path
 _H1 = re.compile(r"^#\s+(.*)", re.MULTILINE)
 _SECTION_SPLIT = re.compile(r"^##\s+", re.MULTILINE)
 
-DEFAULT_DIRS = ("skills", ".nyx/skills")
+# Packaged packs ship with the wheel; the cwd dirs are the operator's own.
+PACKAGED_DIR = Path(__file__).resolve().parent / "skill_packs"
+CWD_DIRS = ("skills", ".nyx/skills")
+
+
+def default_dirs() -> list[Path]:
+    return [PACKAGED_DIR] + [Path(d) for d in CWD_DIRS]
 
 
 def _tags_for(*texts: str) -> list[str]:
@@ -58,7 +64,7 @@ def _ingest_file(memory, path: Path, max_chars: int) -> int:
 
 def sync_skills(memory, skills_dir: str | Path | None = None, max_chars: int = 4000) -> int:
     """Ingest markdown skills (per-section) into long-term memory. Returns count."""
-    dirs = [Path(skills_dir)] if skills_dir else [Path(d) for d in DEFAULT_DIRS]
+    dirs = [Path(skills_dir)] if skills_dir else default_dirs()
     n = 0
     for directory in dirs:
         if not directory.exists():

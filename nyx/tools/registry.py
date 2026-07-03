@@ -46,6 +46,11 @@ class ToolRegistry:
     def __init__(self, ledger: AuditLedger | None = None):
         self._tools: dict[str, Tool] = {}
         self.ledger = ledger
+        self._allowed: set[str] | None = None   # None = all tools permitted
+
+    def set_allowed(self, names) -> None:
+        """Restrict callable tools to ``names`` (least privilege). None = all."""
+        self._allowed = set(names) if names is not None else None
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
@@ -71,6 +76,12 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if tool is None:
             return ToolResult(ok=False, error=f"unknown tool: {name}")
+        if self._allowed is not None and name not in self._allowed:
+            if self.ledger is not None:
+                self.ledger.append("tools", f"deny:{name}",
+                                   rationale="tool not permitted for this capability",
+                                   decision="BLOCK")
+            return ToolResult(ok=False, error=f"tool '{name}' not permitted (least privilege)")
         t0 = time.time()
         try:
             result = tool.func(**kwargs)

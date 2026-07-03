@@ -7,7 +7,7 @@ from nyx.domains.investing.backtest import llm_factor_weights
 from nyx.memory import MemoryStore
 from nyx.skills import sync_skills
 
-REPO_SKILLS = Path(__file__).resolve().parent.parent / "skills"
+REPO_SKILLS = Path(__file__).resolve().parent.parent / "nyx" / "skill_packs"
 
 
 def test_shipped_skill_packs_exist_and_are_deep():
