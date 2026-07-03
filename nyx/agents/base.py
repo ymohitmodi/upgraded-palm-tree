@@ -154,6 +154,72 @@ class Agent:
             findings=findings,
         )
 
+    # -- agentic tool use (ReAct-lite) --------------------------------------
+    def run_with_tools(self, task: str, toolbox, context: str = "", max_steps: int = 3) -> AgentResult:
+        """Let the agent call tools to ground its work, then answer.
+
+        The model may emit ``CALL <tool> <json-args>``; the harness executes it
+        through the guardrailed, least-privilege, injection-classifying tool
+        registry and feeds the (untrusted) result back. Bounded by max_steps and
+        the shared call budget. Offline mock models emit no CALL, so this cleanly
+        degrades to a single-shot ``run``.
+        """
+        if toolbox is None:
+            return self.run(task, context)
+
+        guardrails = Guardrails()
+        sys = self._system_message()
+        tool_doc = (
+            "\n\n# TOOLS\nYou may call tools to gather grounded evidence. To call one, "
+            "output a line exactly like `CALL <tool_name> {\"arg\": \"value\"}`. You will "
+            "receive the result (untrusted data) and may call again or give your final "
+            "answer. Available tools:\n" + toolbox.describe()
+        )
+        messages = [
+            ChatMessage(role="system", content=sys.content + tool_doc),
+            self._user_message(task, context, guardrails),
+        ]
+        model = self.config.model(self.genome.model_role)
+        last_text = ""
+        for _ in range(max(1, max_steps)):
+            completion = self.provider.chat(model, messages, temperature=self.genome.temperature,
+                                            max_tokens=self.genome.max_tokens)
+            self.metrics.record_call(completion.prompt_tokens, completion.completion_tokens)
+            last_text = completion.text
+            call = self._parse_tool_call(completion.text)
+            if not call:
+                break
+            name, args = call
+            result = toolbox.call(name, **args)
+            if self.ledger:
+                self.ledger.append(actor=f"agent:{self.role}", action=f"tool:{name}",
+                                   rationale=(result.error or "ok")[:80],
+                                   decision="PASS" if result.ok else "BLOCK")
+            messages.append(ChatMessage(role="assistant", content=completion.text))
+            messages.append(ChatMessage(
+                role="user",
+                content=f"# TOOL RESULT ({name})\n{guardrails.sanitize_outbound(result.text())}"))
+
+        return AgentResult(
+            role=self.role, text=last_text, model=model,
+            claims=self._extract_claims(last_text), score=self._extract_score(last_text),
+            findings=list(guardrails.findings),
+        )
+
+    @staticmethod
+    def _parse_tool_call(text: str):
+        """Parse a `CALL <tool> <json>` directive; return (name, args) or None."""
+        import json
+
+        m = re.search(r"^\s*CALL\s+([\w.\-]+)\s+(\{.*\})\s*$", text, re.MULTILINE | re.DOTALL)
+        if not m:
+            return None
+        try:
+            args = json.loads(m.group(2))
+            return (m.group(1), args) if isinstance(args, dict) else None
+        except (ValueError, TypeError):
+            return None
+
     # -- parsing helpers -----------------------------------------------------
     @staticmethod
     def _extract_claims(text: str) -> dict[str, bool]:

@@ -96,6 +96,19 @@ class ValueInvestingCapability(Capability):
                                 source="edgar")
             stats["filings"] = 1
             stats["live"] = True
+
+        # Read the FULL latest 10-K end to end (LongDocReader digests it without
+        # overflowing context) and store the whole-document synthesis in memory.
+        idx_url = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany"
+                   f"&ticker={ticker}&type=10-K&dateb=&owner=include&count=1")
+        rd = ctx.toolbox.call("read_url", url=idx_url,
+                              query="risk factors, debt, leases, litigation, going concern, footnotes")
+        if rd.ok and rd.data.strip():
+            ctx.memory.remember(f"10-K digest for {ticker}: {rd.text(1500)}",
+                                kind="research", tags=["sec", ticker.lower(), "10-k", "filing"],
+                                source=idx_url, weight=1.5)
+            stats["digested"] = stats.get("digested", 0) + 1
+            stats["live"] = True
         return stats
 
     def plan(self, objective: str, ctx: CycleContext) -> list[str]:

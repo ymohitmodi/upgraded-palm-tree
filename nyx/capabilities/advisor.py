@@ -50,7 +50,9 @@ class AdvisorCapability(Capability):
                             ledger=ctx.ledger, metrics=ctx.metrics,
                             genome=ctx.genomes.get("advisor"))
         agent.lessons = ctx.lessons  # recalled doctrine + past learnings
-        result = agent.run(task)
+        # Agentic: the advisor may call research tools (web_fetch/read_url) to
+        # ground its deliverable; degrades to single-shot when the brain can't.
+        result = agent.run_with_tools(task, ctx.toolbox)
         verdict = ctx.constitution.evaluate("review", result.text, {"security_ok": True})
         lessons = [(f"Advisor deliverable for '{task[:60]}' "
                     f"{'passed' if verdict.passed else 'was blocked by'} gates.",

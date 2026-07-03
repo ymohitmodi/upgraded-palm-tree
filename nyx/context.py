@@ -125,6 +125,22 @@ class DocumentDigest:
         return [self.chunks[i] for i in ranked[:k]]
 
 
+def digest_to_memory(memory, text: str, *, source: str, tags: list[str],
+                     config=None, provider=None, chunk_chars: int = 3000) -> "DocumentDigest":
+    """Read a long document and write its whole-document synthesis into memory.
+
+    This is how the factory *learns from what it reads*: a full 10-K or annual
+    report becomes a bounded, recallable research memory (tagged for retrieval),
+    while the raw chunks stay indexed on the returned digest for detail lookups.
+    """
+    reader = LongDocReader(config, provider, chunk_chars=chunk_chars)
+    digest = reader.read(text, source=source)
+    memory.remember(f"RESEARCH — {source}: {digest.synthesis}",
+                    kind="research", tags=tags, source=source, weight=1.5)
+    memory._flush()
+    return digest
+
+
 class LongDocReader:
     """Read arbitrarily long text within a fixed context budget, losing nothing."""
 

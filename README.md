@@ -1,15 +1,35 @@
 # NYX — The Autonomous Dark Factory
 
-> A constitutional, self‑evolving, multi‑agent software factory that explores,
-> designs, builds, ships, and operates real products with **zero physical
-> employees** — running on an **Ollama Cloud** brain from a single
-> **Windows 11 mini‑PC**.
+> A constitutional, self‑evolving, multi‑agent **dark factory** that turns one
+> plain‑language objective into continuous, compounding, self‑improving work —
+> for **software, deep‑value investing, or an ambiguous career/EB‑1 goal** —
+> running on an **Ollama Cloud** brain, lights‑out, from a single mini‑PC.
 
 NYX (the Greek goddess of night — the *lights‑out* factory) is an agentic
 operating system for the **solopreneur of the autonomous era**. One human sets
-the intent. A swarm of specialized AI agents does the rest: feature
-exploration, product design, coding, review, testing, deployment, and 24/7
-operational excellence.
+the intent; a swarm of specialized AI agents plans, acts (with tools), gates
+every step against a Constitution, remembers what it learns, and **evolves to
+get better** — without babysitting.
+
+```bash
+nyx run "Find deep-value public companies for a 20% CAGR; learn from Buffett; \
+keep reading SEC filings and Berkshire reports" --keep-going --autonomy autonomous
+```
+
+One command. It routes to the right capability, plans a backlog, reads full
+filings without losing context, decides, reflects into long‑term memory,
+evolves its agents against a real benchmark, consolidates ("sleep"), and repeats
+— every action written to a tamper‑evident audit ledger.
+
+### What NYX is great at (and what it isn't)
+
+NYX is **not** a smarter chatbot — it rides on top of an LLM. Its edge is a
+*different axis*: **unattended continuity + governance**. A chat app is a
+brilliant advisor with amnesia and no hands; NYX remembers across months, acts
+on a schedule, reads live sources, evolves, and logs everything. Use a chat app
+to *think*; use NYX to *keep executing* long‑horizon, evidence‑compounding goals
+(an EB‑1 dossier, a monitored value screen, a shipping backlog). For one‑shot
+drafting or in‑editor coding, use the chat app.
 
 It is built on three convictions:
 
@@ -52,16 +72,19 @@ into something a single founder can run from a mini‑PC:
 
 | Pillar | What it means in NYX | Module |
 | --- | --- | --- |
-| **Autonomous mission loop** | Objective → plan → build → evolve → adopt → repeat | [`nyx/mission.py`](nyx/mission.py) |
-| **Dark Factory** | End‑to‑end autonomous SDLC pipeline | [`nyx/factory`](nyx/factory) |
-| **Fan‑Out Factory** | Many agents work the same stage in parallel; the best result wins | [`nyx/factory/fanout.py`](nyx/factory/fanout.py) |
-| **Constitutional AI** | Principles enforced on every model call | [`nyx/constitution.py`](nyx/constitution.py) |
-| **Self‑Evolving Agents** | Darwin‑Gödel archive of improving agents | [`nyx/evolution`](nyx/evolution) |
-| **Memory & continual learning** | Episodic + procedural + semantic memory; reflect → remember → recall → consolidate | [`nyx/memory.py`](nyx/memory.py) |
-| **Pluggable capabilities** | Drop‑in goal handlers on one autonomous runner (e.g. value investing) | [`nyx/capabilities`](nyx/capabilities) |
-| **Real benchmarks** | SWE‑bench‑style code execution + point‑in‑time value backtest | [`nyx/evolution/benchmarks.py`](nyx/evolution/benchmarks.py), [`nyx/domains/investing`](nyx/domains/investing) |
-| **Secure AI** | Prompt‑injection guards, secret hygiene, sandboxing | [`nyx/security`](nyx/security) |
-| **Operational Excellence** | Audit ledger, metrics, SRE agent | [`nyx/observability`](nyx/observability) |
+| **One autonomous loop, LLM‑routed** | Objective → route → plan → act → gate → reflect → recall → evolve → consolidate → repeat | [`nyx/capabilities/runner.py`](nyx/capabilities/runner.py) |
+| **Pluggable capabilities** | `software`, `value‑investing`, `advisor` (careers/EB‑1) — drop in a `Capability` and it inherits the whole stack | [`nyx/capabilities`](nyx/capabilities) |
+| **Dark Factory + Fan‑Out** | Gated SDLC pipeline; many agents work a stage, the best wins | [`nyx/factory`](nyx/factory) |
+| **Agentic tool use** | Agents call tools (web/EDGAR/`read_url`) mid‑task via a guardrailed ReAct loop | [`nyx/agents/base.py`](nyx/agents/base.py) |
+| **Self‑Evolving Agents** | Darwin‑Gödel archive; a variant is adopted only if it beats its ancestor | [`nyx/evolution`](nyx/evolution) |
+| **Memory + "sleep"** | Episodic + procedural + semantic; reflect → recall → **consolidate** into long‑term principles | [`nyx/memory.py`](nyx/memory.py) |
+| **Semantic recall** | Cosine similarity over embeddings (offline hashing or live) | [`nyx/embeddings.py`](nyx/embeddings.py) |
+| **Long‑document context** | Read a full 10‑K without overflow (refine‑fold + retrieval) | [`nyx/context.py`](nyx/context.py) |
+| **Deep skills** | PhD‑level packs (Buffett/Graham, EB‑1A, frontier‑AI) ingested per‑section into memory | [`nyx/skill_packs`](nyx/skill_packs) |
+| **Real benchmarks** | SWE‑bench‑style code execution + point‑in‑time value backtest | [`nyx/domains/investing`](nyx/domains/investing) |
+| **State‑of‑the‑art AI security** | Constitution + LLM injection classifier + SSRF/egress guard + least‑privilege typed tools + sandbox + secret hygiene (OWASP LLM Top 10) | [`nyx/security`](nyx/security) |
+| **Constitutional governance** | 17 principles (incl. least‑privilege, safe egress, evolve‑within‑rules) enforced on every call; hash‑chained audit ledger | [`constitution/constitution.yaml`](constitution/constitution.yaml) |
+| **Tools & connectivity** | Web crawl, SEC EDGAR/XBRL, MCP servers (`nyx mcp-init`) | [`nyx/tools`](nyx/tools) |
 | **Ollama Cloud brain** | One config, any frontier‑class cloud model | [`nyx/providers/ollama_cloud.py`](nyx/providers/ollama_cloud.py) |
 
 ## Quick start
@@ -162,14 +185,38 @@ one‑shot installer [`scripts/setup-windows11.ps1`](scripts/setup-windows11.ps1
 - [Tools, MCP & web access](docs/TOOLS.md) — equipping NYX with EDGAR/MCP/scraping
 - [Windows 11 deployment](docs/DEPLOYMENT_WINDOWS11.md)
 
+## Going live
+
+```bash
+pip install -e ".[investing]"          # + edgartools for SEC/XBRL
+export OLLAMA_API_KEY=...               # your Ollama Cloud (pro) key → the brain
+export EDGAR_IDENTITY="Name email"      # SEC requires it
+nyx mcp-init                            # register the SEC EDGAR MCP server
+nyx skills                              # load the deep skill packs into memory
+nyx run "<your objective>" --keep-going --autonomy autonomous
+```
+
+Allow `sec.gov` / `berkshirehathaway.com` / `stooq.com` in your network policy
+(or run on a mini‑PC with open internet). Without a key it runs in deterministic
+**mock mode** — fully testable, but the deliverable quality comes from the live
+model.
+
 ## Status
 
-NYX is a **reference implementation and framework**. The autonomous mission
-loop, orchestration, constitution engine, evolution archive (with genomes
-adopted back into the factory), guardrails, audit ledger, and Ollama Cloud
-provider are all functional and covered by tests. Agent "work" is performed by
-real model calls when a key is present and by deterministic stubs otherwise, so
-the architecture is fully runnable and testable today.
+NYX is a **runnable reference framework** — **102 tests passing**, `ruff` clean,
+CI on 3.10–3.12. Functional and tested: the LLM‑routed capability runner, the
+three capabilities, the gated dark‑factory pipeline + fan‑out, agentic tool use,
+the Darwin‑Gödel evolution archive (genomes adopted back in), three‑layer memory
+with consolidation and embedding recall, the long‑document context engine, the
+security stack (constitution, injection classifier, SSRF/egress guard,
+least‑privilege typed tools, sandbox, audit ledger), and the Ollama Cloud
+provider. Agent "work" is real model calls when a key is present and
+deterministic stubs otherwise, so the whole architecture runs offline today.
+
+> **Honest scope.** This is strong defense‑in‑depth and a real autonomy engine,
+> not a proof of safety or a guarantee of investment returns — the constitution
+> explicitly forbids guaranteeing returns. The deliverable quality tracks the
+> model you point it at.
 
 ## License
 
