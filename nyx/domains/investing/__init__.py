@@ -8,6 +8,13 @@ from .backtest import (
     ValueBenchmark,
     default_universe,
 )
+from .data import (
+    DataUnavailable,
+    build_universe,
+    build_universes,
+    parse_stooq_csv,
+    try_build_universes,
+)
 from .buffett import (
     PRINCIPLES,
     fetch_letters,
@@ -20,4 +27,6 @@ __all__ = [
     "PRINCIPLES", "seed_principles", "letter_urls", "fetch_letters",
     "ValueBenchmark", "Universe", "Company", "default_universe", "INVESTING_DIRECTIVES",
     "check_investing", "investing_constitution",
+    "DataUnavailable", "build_universe", "build_universes", "parse_stooq_csv",
+    "try_build_universes",
 ]

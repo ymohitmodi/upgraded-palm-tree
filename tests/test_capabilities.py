@@ -66,7 +66,7 @@ def test_build_universe_with_injected_fakes():
                                debt_to_equity=1.8, owner_earnings_yield=0.01),
     }
     rets = {"AAA": 0.30, "BBB": -0.15}
-    u = build_universe(["AAA", "BBB"], as_of="2020-01-02",
+    u = build_universe(["AAA", "BBB"], as_of="2020-01-02", min_companies=2,
                        fundamentals_fn=lambda t: funds[t], forward_return_fn=lambda t: rets[t])
     assert len(u.companies) == 2
     aaa = next(c for c in u.companies if c.ticker == "AAA")

@@ -196,6 +196,31 @@ def cmd_memory(args) -> int:
     return 0
 
 
+def cmd_universe(args) -> int:
+    """Preview the backtest universe — live EDGAR+prices if reachable, else synthetic."""
+    from .domains.investing import default_universe, try_build_universes
+    from .domains.investing.capability import DEFAULT_TICKERS
+    from .tools import WebFetcher
+
+    cfg = load_config()
+    print(_banner(cfg) + "\n")
+    fetcher = WebFetcher(cache_dir=cfg.web_cache_dir, user_agent=cfg.user_agent,
+                         allowed_domains=cfg.allowed_domains,
+                         rate_limit_seconds=cfg.web_rate_limit_seconds)
+    universes = try_build_universes(DEFAULT_TICKERS, identity=cfg.edgar_identity, fetcher=fetcher)
+    live = universes is not None
+    universes = universes or [default_universe()]
+    source = ("EDGAR live walk-forward" if live else
+              "synthetic (set EDGAR_IDENTITY + allow sec.gov/stooq.com for live data)")
+    print(f"Source: {source}")
+    for u in universes:
+        print(f"\n  as_of {u.as_of}: {len(u.companies)} companies")
+        for c in u.companies[: args.limit]:
+            print(f"    {c.ticker:8s} mos={c.margin_of_safety:+.2f} roic={c.roic:.2f} "
+                  f"d/e={c.debt_to_equity:.2f} oey={c.owner_earnings_yield:.2f}")
+    return 0
+
+
 def cmd_backtest(args) -> int:
     """Backtest the current/evolved analyst genome on the value universe."""
     from .domains.investing import ValueBenchmark
@@ -468,6 +493,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     bt = sub.add_parser("backtest", help="backtest the analyst genome (value suite)")
     bt.set_defaults(func=cmd_backtest)
+
+    uv = sub.add_parser("universe", help="preview the backtest universe (live or synthetic)")
+    uv.add_argument("--limit", type=int, default=8, help="companies to show per period")
+    uv.set_defaults(func=cmd_universe)
 
     cp = sub.add_parser("capabilities", help="list pluggable goal capabilities")
     cp.add_argument("objective", nargs="?", help="optional: show which capability handles it")

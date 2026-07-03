@@ -129,8 +129,16 @@ How it stays honest:
   evolution discovers that. (Demo: a doctrine analyst returns ~+25% with zero
   downside vs negative for a no-doctrine genome.)
 
-Swap `default_universes()` for real EDGAR fundamentals + realized forward prices
-and the exact same mechanics become a real walk-forward backtest.
+**Live data (fully wired).** When `EDGAR_IDENTITY` is set and `sec.gov` /
+`stooq.com` are reachable, the investing capability builds a **real multi-date
+walk-forward** (`nyx/domains/investing/data.py`): point-in-time fundamentals from
+edgartools (latest 10-K on/before each backtest date, to limit look-ahead) and
+realized ~1‑year forward returns from Stooq. It is **resilient by construction** —
+a bad ticker is skipped, a garbled price feed parses to nothing rather than
+crashing, all factors are validated finite, and a universe with too few clean
+companies (`< MIN_COMPANIES`) is refused so z‑scores are never computed on noise.
+If any of that is unavailable it transparently falls back to the synthetic
+walk‑forward. Preview whichever is active with **`nyx universe`**.
 
 ### Investing constitution gates
 

@@ -14,7 +14,7 @@ from ...constitution import Constitution
 from ...tools.web import WebFetcher
 from ..investing import buffett
 from ..investing.backtest import INVESTING_DIRECTIVES, ValueBenchmark
-from ..investing.data import try_build_universe
+from ..investing.data import try_build_universes
 from ..investing.gates import check_investing, investing_constitution
 from ...capabilities.base import Capability, CycleContext, CycleResult
 
@@ -62,18 +62,20 @@ class ValueInvestingCapability(Capability):
 
     def benchmark(self, ctx: CycleContext) -> ValueBenchmark:
         if self._benchmark is None:
-            # Prefer a real, point-in-time universe; fall back to synthetic.
+            # Prefer a real, point-in-time WALK-FORWARD (several as-of dates);
+            # fall back to the synthetic walk-forward if data is unavailable.
             fetcher = WebFetcher(cache_dir=ctx.config.web_cache_dir,
                                  user_agent=ctx.config.user_agent,
                                  allowed_domains=ctx.config.allowed_domains,
                                  rate_limit_seconds=ctx.config.web_rate_limit_seconds)
-            universe = try_build_universe(self.tickers, identity=ctx.config.edgar_identity,
-                                          fetcher=fetcher)
+            universes = try_build_universes(self.tickers, identity=ctx.config.edgar_identity,
+                                            fetcher=fetcher)
             self._benchmark = ValueBenchmark(
-                universes=[universe] if universe else None,
+                universes=universes,   # None → ValueBenchmark uses the synthetic set
                 config=ctx.config, provider=ctx.provider,  # LLM-derived factor weights when live
             )
-            src = "EDGAR(live)" if universe else "synthetic"
+            src = (f"EDGAR live walk-forward ({len(universes)} periods)"
+                   if universes else "synthetic walk-forward")
             ctx.ledger.append("value-investing", "universe", rationale=src, decision="INFO")
         return self._benchmark
 
