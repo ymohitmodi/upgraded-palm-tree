@@ -1,22 +1,27 @@
 """MCP (Model Context Protocol) support — register external tool servers.
 
-NYX can use any MCP server (e.g. edgartools-mcp) as a source of tools. Servers
-are declared in a manifest (default ``.nyx/mcp.json``), in the same shape as
-Claude Desktop's ``mcpServers`` block, so configs are portable:
+NYX can use any MCP server as a source of tools. The recommended SEC server is
+`sec-edgar-mcp <https://github.com/stefanoamorelli/sec-edgar-mcp>`_ (built on
+edgartools; exposes filings, XBRL-parsed financials, and Form 3/4/5 insider
+trading, every response carrying the source SEC URL). Servers are declared in a
+manifest (default ``.nyx/mcp.json``), in the same shape as Claude Desktop's
+``mcpServers`` block, so configs are portable:
 
     {
       "mcpServers": {
-        "edgar": {
-          "command": "python", "args": ["-m", "edgar.ai"],
-          "env": {"EDGAR_IDENTITY": "Your Name your.email@example.com"}
+        "sec-edgar-mcp": {
+          "command": "docker",
+          "args": ["run", "-i", "--rm",
+                   "-e", "SEC_EDGAR_USER_AGENT=Your Name (your@email.com)",
+                   "stefanoamorelli/sec-edgar-mcp:latest"]
         }
       }
     }
 
 ``MCPClient`` speaks the minimal stdio JSON-RPC needed to ``initialize``, list
-tools, and call them. It's intentionally small and best-effort: spawning a live
-server needs that server installed and (for edgar) network access, so the live
-path is exercised in deployment, while tests cover manifest parsing only.
+tools, and call them (works with the docker/stdio server above). It's small and
+best-effort: spawning a live server needs Docker + network, so the live path is
+exercised in deployment, while tests cover manifest parsing only.
 """
 from __future__ import annotations
 
@@ -52,15 +57,24 @@ def load_manifest(path: str | Path) -> list[MCPServerSpec]:
     return specs
 
 
-def write_sample_manifest(path: str | Path, identity: str = "Your Name your.email@example.com") -> Path:
-    """Write a ready-to-edit manifest registering the edgartools MCP server."""
+def write_sample_manifest(path: str | Path,
+                          identity: str = "Your Name (your@email.com)") -> Path:
+    """Write a ready-to-edit manifest registering the sec-edgar-mcp server.
+
+    Uses the project's recommended Docker/stdio invocation
+    (https://github.com/stefanoamorelli/sec-edgar-mcp). SEC requires a real
+    contact in ``SEC_EDGAR_USER_AGENT`` (format: ``Name (email)``)."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({
         "mcpServers": {
-            "edgar": {
-                "command": "python", "args": ["-m", "edgar.ai"],
-                "env": {"EDGAR_IDENTITY": identity},
+            "sec-edgar-mcp": {
+                "command": "docker",
+                "args": [
+                    "run", "-i", "--rm",
+                    "-e", f"SEC_EDGAR_USER_AGENT={identity}",
+                    "stefanoamorelli/sec-edgar-mcp:latest",
+                ],
             }
         }
     }, indent=2), encoding="utf-8")

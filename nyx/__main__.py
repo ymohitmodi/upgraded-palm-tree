@@ -269,12 +269,14 @@ def cmd_mcp_init(args) -> int:
     from .tools.mcp import write_sample_manifest
 
     cfg = load_config()
-    identity = cfg.edgar_identity or "Your Name your.email@example.com"
+    identity = cfg.edgar_identity or "Your Name (your@email.com)"
     path = write_sample_manifest(cfg.mcp_manifest, identity=identity)
     print(f"Wrote MCP manifest: {path}")
-    print("Registered: edgar (python -m edgar.ai). Install with: "
-          "pip install -e '.[investing]' and set EDGAR_IDENTITY.")
-    print("Add more servers by editing the file (Claude Desktop mcpServers shape).")
+    print("Registered: sec-edgar-mcp (https://github.com/stefanoamorelli/sec-edgar-mcp)")
+    print("Runs via Docker: `docker run -i --rm -e SEC_EDGAR_USER_AGENT=... "
+          "stefanoamorelli/sec-edgar-mcp:latest` — filings, XBRL financials, "
+          "Form 3/4/5 insider trading, each with the source SEC URL.")
+    print("Set SEC_EDGAR_USER_AGENT to 'Name (email)'. Edit the file to add more servers.")
     return 0
 
 

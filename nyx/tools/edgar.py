@@ -1,10 +1,12 @@
 """SEC EDGAR tools — XBRL financials, filings, facts.
 
-Wraps the ``edgartools`` library (the same engine behind the edgartools MCP
-server: https://github.com/sareegpt/edgartools-mcp). We use it **directly as a
-Python library** rather than spawning the MCP subprocess, because NYX is itself
-a Python app — fewer moving parts, same data. If you prefer the MCP server,
-register it in ``.nyx/mcp.json`` instead (see ``nyx/tools/mcp.py``).
+Wraps the ``edgartools`` library — the same engine behind the recommended
+`sec-edgar-mcp <https://github.com/stefanoamorelli/sec-edgar-mcp>`_ server. We
+use it **directly as a Python library** rather than spawning the MCP subprocess,
+because NYX is itself a Python app — fewer moving parts, same data and precision.
+To use the MCP server instead (filings, XBRL financials, Form 3/4/5 insider
+trading, each with the source SEC URL), run ``nyx mcp-init`` to register it in
+``.nyx/mcp.json`` and it becomes the ``mcp.sec-edgar-mcp`` tool.
 
 Optional dependency: ``pip install "edgartools[ai]"`` and set
 ``EDGAR_IDENTITY="Your Name your.email@example.com"`` (SEC requires it). Without

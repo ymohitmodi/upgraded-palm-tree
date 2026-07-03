@@ -59,12 +59,14 @@ def test_registry_audits_and_guardrails(tmp_path):
 
 def test_mcp_manifest_roundtrip(tmp_path):
     path = tmp_path / "mcp.json"
-    write_sample_manifest(path, identity="Jane Doe jane@example.com")
+    write_sample_manifest(path, identity="Jane Doe (jane@example.com)")
     specs = load_manifest(path)
     assert len(specs) == 1
-    assert specs[0].name == "edgar"
-    assert specs[0].command == "python" and "edgar.ai" in specs[0].args[-1]
-    assert specs[0].env["EDGAR_IDENTITY"] == "Jane Doe jane@example.com"
+    spec = specs[0]
+    assert spec.name == "sec-edgar-mcp"
+    assert spec.command == "docker"
+    assert "stefanoamorelli/sec-edgar-mcp:latest" in spec.args
+    assert "SEC_EDGAR_USER_AGENT=Jane Doe (jane@example.com)" in spec.args
 
 
 def test_build_toolbox_registers_expected_tools(config):

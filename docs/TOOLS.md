@@ -60,24 +60,36 @@ box.call("edgar_financials", ticker="AAPL")
 box.call("edgar_facts", ticker="BRK-B")     # footnote-level XBRL
 ```
 
-## Registering MCP servers
+## Registering MCP servers (recommended: sec-edgar-mcp)
 
-Drop a manifest at `.nyx/mcp.json` (same shape as Claude Desktop's `mcpServers`):
+The recommended SEC server is
+[**sec-edgar-mcp**](https://github.com/stefanoamorelli/sec-edgar-mcp) — built on
+edgartools, exposing **filings** (10-K/10-Q/8-K + section extraction),
+**financials** (balance sheet / income / cash flow, XBRL-parsed), and
+**insider trading** (Form 3/4/5), with every response carrying the source SEC
+URL. Generate the manifest with `nyx mcp-init` (or
+`nyx.tools.mcp.write_sample_manifest(".nyx/mcp.json")`):
 
 ```json
 {
   "mcpServers": {
-    "edgar": {
-      "command": "python", "args": ["-m", "edgar.ai"],
-      "env": { "EDGAR_IDENTITY": "Your Name your.email@example.com" }
+    "sec-edgar-mcp": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm",
+               "-e", "SEC_EDGAR_USER_AGENT=Your Name (your@email.com)",
+               "stefanoamorelli/sec-edgar-mcp:latest"]
     }
   }
 }
 ```
 
-Generate a starter with `nyx.tools.mcp.write_sample_manifest(".nyx/mcp.json")`.
-Each server appears as an `mcp.<name>` tool; `MCPClient` speaks stdio JSON-RPC
-(`initialize` → `tools/list` → `tools/call`).
+It runs via Docker over stdio (SEC requires a real `SEC_EDGAR_USER_AGENT` in the
+form `Name (email)`); a local mode also exists
+(`python -m sec_edgar_mcp.server --transport streamable-http --port 9870`). Each
+configured server appears as an `mcp.<name>` tool; `MCPClient` speaks stdio
+JSON-RPC (`initialize` → `tools/list` → `tools/call`). NYX's built-in
+`edgar_*`/`read_url` tools use the **same edgartools engine** directly, so you
+can pick either path.
 
 ## Learning from Buffett
 
