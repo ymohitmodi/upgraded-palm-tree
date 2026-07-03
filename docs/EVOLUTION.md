@@ -67,8 +67,8 @@ can only get safer over time.
 ## Closing the loop: evolution feeds the factory
 
 Evolution is not a side activity — it is wired into the
-[autonomous mission loop](../nyx/mission.py). When you run `nyx run "<objective>"`,
-the controller periodically calls the evolution engine, then **adopts the
+[autonomous loop](../nyx/capabilities/runner.py). When you run `nyx run "<objective>"`,
+the runner periodically calls the evolution engine, then **adopts the
 archive's best genome for the role back into the factory** (`Factory(genomes=...)`).
 Subsequent build cycles are therefore executed by *improved* agents, and the
 gains persist across missions because the archive is on disk. That is the

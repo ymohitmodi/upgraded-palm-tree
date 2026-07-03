@@ -7,8 +7,9 @@ a clean seam to the next.
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  OPERATOR (human)            nyx CLI  ── intent, gates, taste              │
 ├──────────────────────────────────────────────────────────────────────────┤
-│  MISSION CONTROL             nyx/mission.py                                │
-│   objective → plan → [build cycle]×N → evolve → adopt genome → repeat      │
+│  CAPABILITY RUNNER           nyx/capabilities/runner.py                    │
+│   objective → route → plan → act → gate → reflect → evolve → adopt → loop  │
+│   capabilities: software · value-investing · advisor  (nyx/capabilities/*) │
 ├──────────────────────────────────────────────────────────────────────────┤
 │  FACTORY ORCHESTRATOR        nyx/factory/orchestrator.py                   │
 │   Explore → Design → Build → Review → Test → Ship → Operate               │
@@ -32,8 +33,8 @@ a clean seam to the next.
 ## The autonomous mission loop
 
 `nyx run "<objective>"` is the self-driving entrypoint
-([`nyx/mission.py`](../nyx/mission.py)). It turns a single objective into
-continuous, compounding output:
+([`nyx/capabilities/runner.py`](../nyx/capabilities/runner.py)). It routes the
+objective to a capability and turns it into continuous, compounding output:
 
 1. **Plan** — a Planner agent decomposes the objective into a backlog of
    shippable features.

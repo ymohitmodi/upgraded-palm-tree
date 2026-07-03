@@ -114,7 +114,7 @@ nyx evolve --generations 5
 ## "If I give it an objective, will it keep going, stay productive, and evolve?"
 
 **Yes — that's what `nyx run` does.** Hand it one objective and the
-[mission controller](nyx/mission.py) closes the loop:
+[capability runner](nyx/capabilities/runner.py) closes the loop:
 
 ```
 objective ─▶ PLAN (decompose into a backlog of shippable features)
