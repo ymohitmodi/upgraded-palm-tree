@@ -28,6 +28,7 @@ prices and the exact same mechanics become a real walk-forward backtest.
 from __future__ import annotations
 
 import random
+import re
 from dataclasses import dataclass, field
 
 from ...agents.base import Agent, Genome
@@ -105,19 +106,25 @@ def _z(values: list[float]) -> list[float]:
     return [(v - mean) / sd for v in values]
 
 
-def genome_factor_weights(genome: Genome | None) -> dict:
-    """Derive factor weights from what the analyst's charter emphasizes.
+_FACTORS = ("mos", "roic", "debt", "oey")
+_FACTOR_DESC = {
+    "mos": "margin of safety / discount to intrinsic value",
+    "roic": "return on invested capital, moat, business quality",
+    "debt": "penalizing leverage / balance-sheet risk",
+    "oey": "owner-earnings / distributable-cash yield",
+}
 
-    This is the *only* channel by which the evolved genome affects picks — so a
-    genome that encodes the value doctrine tilts toward the factors that matter.
+
+def genome_factor_weights(genome: Genome | None) -> dict:
+    """Deterministic OFFLINE fallback: read the charter's factor emphasis.
+
+    Counts are capped so evolution cannot reward-hack by keyword stuffing. When a
+    live brain is available, ``llm_factor_weights`` supersedes this — the model,
+    not substring rules, decides how the analyst weighs factors.
     """
-    # A genome with no doctrine applies no value factors (picks ~arbitrarily);
-    # only the principles it encodes turn factors on — so doctrine has to be
-    # *learned* (or seeded), and emphasis differs as evolution accumulates it.
-    base = {"mos": 0.0, "roic": 0.0, "debt": 0.0, "oey": 0.0}
+    base = {f: 0.0 for f in _FACTORS}
     text = (genome.system_prompt.lower() if genome else "")
-    # Counts are CAPPED so evolution cannot reward-hack by stuffing the same
-    # keyword-bearing directive repeatedly — emphasis saturates at 2 mentions.
+
     def hits(*terms: str) -> float:
         return min(sum(text.count(t) for t in terms), 2)
 
@@ -126,6 +133,33 @@ def genome_factor_weights(genome: Genome | None) -> dict:
     base["debt"] += 1.5 * hits("debt", "leverage", "footnote")
     base["oey"] += 1.5 * hits("owner-earnings", "owner earnings", "distributable cash")
     return base
+
+
+def llm_factor_weights(genome: Genome | None, config, provider) -> dict:
+    """Ask the model how strongly the analyst's charter emphasizes each factor.
+
+    No substring rules: the LLM reads the doctrine and rates each factor 0–3.
+    Falls back to the deterministic reader on mock mode or any parse failure."""
+    if genome is None or config is None or provider is None or config.mock_mode:
+        return genome_factor_weights(genome)
+    from ...providers.base import ChatMessage
+
+    factors = "\n".join(f"- {k}: {v}" for k, v in _FACTOR_DESC.items())
+    prompt = (
+        "You are calibrating a value-investing screen. Given the analyst's charter, "
+        "rate how strongly it emphasizes each factor from 0 (ignores) to 3 (central).\n\n"
+        f"CHARTER:\n{genome.system_prompt}\n\nFACTORS:\n{factors}\n\n"
+        "Reply with ONLY four numbers in order mos,roic,debt,oey — e.g. `2,1,1,3`."
+    )
+    try:
+        out = provider.chat(config.model("fast"), [ChatMessage(role="user", content=prompt)],
+                            temperature=0.0, max_tokens=20).text
+        nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", out)][:4]
+        if len(nums) == 4:
+            return {f: min(max(n, 0.0), 3.0) for f, n in zip(_FACTORS, nums)}
+    except Exception:  # noqa: BLE001 — never let scoring crash a run
+        pass
+    return genome_factor_weights(genome)
 
 
 @dataclass
@@ -144,13 +178,20 @@ class ValueBenchmark:
     """
 
     def __init__(self, universes: list[Universe] | None = None, top_n: int = 8,
-                 downside_lambda: float = 2.0):
+                 downside_lambda: float = 2.0, config=None, provider=None):
         self.universes = universes or default_universes()
         self.top_n = top_n
         self.downside_lambda = downside_lambda
+        # When present + live, the LLM (not substring rules) sets factor weights.
+        self.config = config
+        self.provider = provider
 
     def evaluate(self, genome: Genome | None) -> BacktestResult:
-        results = [self._evaluate_one(u, genome) for u in self.universes]
+        # Compute the analyst's factor emphasis ONCE per evaluation (LLM when
+        # live, deterministic fallback otherwise) — genome-dependent, universe-
+        # independent, so it's reused across the walk-forward universes.
+        weights = llm_factor_weights(genome, self.config, self.provider)
+        results = [self._evaluate_one(u, weights) for u in self.universes]
         avg_score = round(sum(r.score for r in results) / len(results), 4)
         avg_return = round(sum(r.portfolio_return for r in results) / len(results), 4)
         avg_down = round(sum(r.downside for r in results) / len(results), 4)
@@ -158,9 +199,8 @@ class ValueBenchmark:
         return BacktestResult(picks=results[0].picks, portfolio_return=avg_return,
                               downside=avg_down, score=avg_score)
 
-    def _evaluate_one(self, universe: Universe, genome: Genome | None) -> BacktestResult:
+    def _evaluate_one(self, universe: Universe, w: dict) -> BacktestResult:
         cos = universe.companies
-        w = genome_factor_weights(genome)
         z_mos = _z([c.margin_of_safety for c in cos])
         z_roic = _z([c.roic for c in cos])
         z_debt = _z([c.debt_to_equity for c in cos])

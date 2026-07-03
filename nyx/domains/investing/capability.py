@@ -62,7 +62,10 @@ class ValueInvestingCapability(Capability):
                                  rate_limit_seconds=ctx.config.web_rate_limit_seconds)
             universe = try_build_universe(self.tickers, identity=ctx.config.edgar_identity,
                                           fetcher=fetcher)
-            self._benchmark = ValueBenchmark(universes=[universe]) if universe else ValueBenchmark()
+            self._benchmark = ValueBenchmark(
+                universes=[universe] if universe else None,
+                config=ctx.config, provider=ctx.provider,  # LLM-derived factor weights when live
+            )
             src = "EDGAR(live)" if universe else "synthetic"
             ctx.ledger.append("value-investing", "universe", rationale=src, decision="INFO")
         return self._benchmark

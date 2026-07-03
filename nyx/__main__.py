@@ -257,10 +257,11 @@ def cmd_skills(args) -> int:
     cfg = load_config()
     store = MemoryStore(cfg.memory_path)
     n = sync_skills(store, args.dir)
-    print(f"Synced {n} skills from {args.dir} into long-term memory "
+    where = args.dir or "skills/ + .nyx/skills/"
+    print(f"Synced {n} skill sections from {where} into long-term memory "
           f"({len(store)} lessons total).")
     if n == 0:
-        print("Drop markdown playbooks into that directory and re-run.")
+        print("Drop markdown playbooks into skills/ or .nyx/skills/ and re-run.")
     return 0
 
 
@@ -448,7 +449,7 @@ def build_parser() -> argparse.ArgumentParser:
     mi.set_defaults(func=cmd_mcp_init)
 
     sk = sub.add_parser("skills", help="sync markdown skills into long-term memory")
-    sk.add_argument("--dir", default=".nyx/skills")
+    sk.add_argument("--dir", default=None, help="specific dir (default: skills/ + .nyx/skills/)")
     sk.set_defaults(func=cmd_skills)
 
     isp = sub.add_parser("ingest-solopreneur",
