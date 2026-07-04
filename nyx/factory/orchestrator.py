@@ -189,6 +189,22 @@ class Factory:
 
             claims.update(primary.claims)
 
+            # Don't trust the tester's self-graded TESTS_PASS: actually EXECUTE
+            # the build's code against the tester's tests in the sandbox and set
+            # the claim from reality (fail-closed on a real failure).
+            if stage == "test":
+                from .verify import verify_artifact
+
+                build_art = next((s.artifact for s in result.stages if s.stage == "build"), "")
+                vr = verify_artifact(build_art, primary.text)
+                if vr.ran:
+                    claims["tests_pass"] = vr.passed
+                self.ledger.append(
+                    "factory", "verify_tests", rationale=vr.detail[:100],
+                    decision=("PASS" if vr.passed else "BLOCK") if vr.ran else "INFO",
+                    data={"ran": vr.ran, "passed": vr.passed, "verified": vr.ran},
+                )
+
             # Special handling: deploy is gated to autonomy + approval.
             if stage == "deploy":
                 held = self._deploy_gate(intent, primary, approver)

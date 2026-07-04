@@ -110,6 +110,7 @@ def _render(role: str, topic: str, seed: int, temperature: float) -> str:
         bodies = [
             "    return sum(items)",
             "    total = 0\n    for it in items:\n        total += it\n    return total",
+            "    import functools, operator\n"
             "    return functools.reduce(operator.add, items, 0)",
         ]
         return (

@@ -182,6 +182,7 @@ one‑shot installer [`scripts/setup-windows11.ps1`](scripts/setup-windows11.ps1
 - [Evolution](docs/EVOLUTION.md) — how agents improve themselves
 - [Memory & learning](docs/MEMORY.md) — how the factory remembers and gets wiser
 - [Context management](docs/CONTEXT.md) — reading full 10-Ks without overflow
+- [Critique & roadmap](docs/CRITIQUE.md) — an honest look at what's real vs. proxy
 - [Tools, MCP & web access](docs/TOOLS.md) — equipping NYX with EDGAR/MCP/scraping
 - [Windows 11 deployment](docs/DEPLOYMENT_WINDOWS11.md)
 
