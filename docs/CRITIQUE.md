@@ -57,10 +57,13 @@ become real.
    Still missing: a *market* signal (did anyone pay?) and live paper-trading over
    real time rather than the backtest as ground truth.
 
-5. **The agentic loop is shallow.** `run_with_tools` is 3-step ReAct with a regex
-   `CALL` protocol, no native function-calling, no error-recovery/retry, no
-   sub-goal planning, no verification of tool results. Frontier agent harnesses
-   are far deeper.
+5. **The agentic loop was shallow.** *(Deepened.)* `run_with_tools` now supports
+   **native function-calling** (OpenAI-style `tools`/`tool_calls`, typed from
+   ArgSpec, allowlist-filtered), **multiple tool calls per turn**, **bounded
+   error recovery** (failures are fed back as `[error]` observations with a hint;
+   after repeated failures it answers from what it has), and a sub-goal scratchpad
+   — with the text `CALL` protocol retained as a fallback. Remaining depth: a
+   critic/verify pass on tool outputs and longer-horizon planning.
 
 ## Gaps ranked by leverage (what to build next)
 

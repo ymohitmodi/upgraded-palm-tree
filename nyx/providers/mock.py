@@ -62,6 +62,7 @@ class MockProvider:
         *,
         temperature: float = 0.2,
         max_tokens: int = 2048,
+        tools: list | None = None,   # accepted for interface parity; mock answers in text
     ) -> Completion:
         role = _role_of(messages)
         topic = _topic_of(messages)

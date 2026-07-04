@@ -22,6 +22,22 @@ class ProviderError(RuntimeError):
     pass
 
 
+def _parse_tool_calls(message: dict) -> list:  # pragma: no cover - network shape
+    """Normalize OpenAI-style message.tool_calls -> [{name, arguments dict}]."""
+    calls = []
+    for tc in message.get("tool_calls") or []:
+        fn = tc.get("function", tc) or {}
+        args = fn.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args or "{}")
+            except ValueError:
+                args = {}
+        if fn.get("name"):
+            calls.append({"name": fn["name"], "arguments": args if isinstance(args, dict) else {}})
+    return calls
+
+
 class OllamaCloudProvider:
     name = "ollama-cloud"
 
@@ -38,6 +54,7 @@ class OllamaCloudProvider:
         *,
         temperature: float = 0.2,
         max_tokens: int = 2048,
+        tools: list | None = None,
     ) -> Completion:
         payload = {
             "model": model,
@@ -46,11 +63,15 @@ class OllamaCloudProvider:
             "max_tokens": max_tokens,
             "stream": False,
         }
+        if tools:
+            payload["tools"] = tools          # OpenAI-style function-calling
         data = self._post(payload)
         try:
-            text = data["choices"][0]["message"]["content"]
+            message = data["choices"][0]["message"]
+            text = message.get("content") or ""
         except (KeyError, IndexError, TypeError) as exc:  # pragma: no cover - network shape
             raise ProviderError(f"unexpected response shape: {data!r}") from exc
+        tool_calls = _parse_tool_calls(message)   # pragma: no cover - network shape
         usage = data.get("usage", {}) or {}
         return Completion(
             text=text,
@@ -58,9 +79,10 @@ class OllamaCloudProvider:
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
             raw=data,
+            tool_calls=tool_calls,
         )
 
-    def embed(self, model: str, text: str) -> list[float]:  # pragma: no cover - network
+    def embed(self, model: str, text: str) -> list[float]:  # pragma: no cover - network placeholder
         """Return a semantic embedding vector from Ollama Cloud's /v1/embeddings."""
         url = f"{self.config.ollama_host}/v1/embeddings"
         payload = {"model": model, "input": text}

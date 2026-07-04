@@ -19,6 +19,32 @@ from ..providers.base import ChatMessage, Provider
 from ..security.guardrails import Guardrails, redact_known_secrets, scan_secrets
 
 
+_JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean",
+               list: "array", dict: "object"}
+
+
+def _tool_schemas(toolbox) -> list:
+    """Build OpenAI-style function schemas for the PERMITTED tools, so a model
+    with native function-calling can invoke them (typed args from ArgSpec)."""
+    schemas = []
+    for tool in toolbox.list():
+        if not toolbox._permitted(tool.name):
+            continue
+        props, required = {}, []
+        for arg, spec in tool.schema.items():
+            if hasattr(spec, "type"):   # ArgSpec
+                props[arg] = {"type": _JSON_TYPES.get(spec.type, "string"),
+                              "description": spec.description}
+                if spec.required:
+                    required.append(arg)
+            else:
+                props[arg] = {"type": "string", "description": str(spec)}
+        schemas.append({"type": "function", "function": {
+            "name": tool.name, "description": tool.description,
+            "parameters": {"type": "object", "properties": props, "required": required}}})
+    return schemas
+
+
 def _output_guard(text: str, system_content: str) -> tuple[str, list[str]]:
     """Scrub leaked secrets from an agent's OUTPUT and flag prompt-leakage
     (OWASP LLM02 sensitive-info disclosure, LLM07 system-prompt leakage)."""
@@ -185,35 +211,57 @@ class Agent:
         guardrails = Guardrails()
         sys = self._system_message()
         tool_doc = (
-            "\n\n# TOOLS\nYou may call tools to gather grounded evidence. To call one, "
-            "output a line exactly like `CALL <tool_name> {\"arg\": \"value\"}`. You will "
-            "receive the result (untrusted data) and may call again or give your final "
-            "answer. Available tools:\n" + toolbox.describe()
+            "\n\n# TOOLS\nWork toward the goal in steps: think about sub-goals, call a "
+            "tool to gather grounded evidence, observe the (untrusted) result, then "
+            "continue or give your final answer. If a tool call fails, read the error and "
+            "try a corrected call or a different tool; if it keeps failing, proceed with "
+            "what you have. Native function-calling is supported; you may also emit a line "
+            "`CALL <tool_name> {\"arg\": \"value\"}` (one or more). Tools:\n"
+            + toolbox.describe()
         )
         messages = [
             ChatMessage(role="system", content=sys.content + tool_doc),
             self._user_message(task, context, guardrails),
         ]
+        schemas = _tool_schemas(toolbox)
         model = self.config.model(self.genome.model_role)
         last_text = ""
+        consecutive_failures = 0
         for _ in range(max(1, max_steps)):
             completion = self.provider.chat(model, messages, temperature=self.genome.temperature,
-                                            max_tokens=self.genome.max_tokens)
+                                            max_tokens=self.genome.max_tokens, tools=schemas)
             self.metrics.record_call(completion.prompt_tokens, completion.completion_tokens)
-            last_text = completion.text
-            call = self._parse_tool_call(completion.text)
-            if not call:
+            last_text = completion.text or last_text
+            # Prefer native structured tool calls; fall back to the text protocol.
+            calls = list(completion.tool_calls) or self._parse_tool_calls(completion.text)
+            if not calls:
                 break
-            name, args = call
-            result = toolbox.call(name, **args)
-            if self.ledger:
-                self.ledger.append(actor=f"agent:{self.role}", action=f"tool:{name}",
-                                   rationale=(result.error or "ok")[:80],
-                                   decision="PASS" if result.ok else "BLOCK")
-            messages.append(ChatMessage(role="assistant", content=completion.text))
-            messages.append(ChatMessage(
-                role="user",
-                content=f"# TOOL RESULT ({name})\n{guardrails.sanitize_outbound(result.text())}"))
+
+            messages.append(ChatMessage(role="assistant",
+                                        content=completion.text or "[tool call]"))
+            any_failed = False
+            for call in calls:
+                name, args = call["name"], call.get("arguments", {})
+                result = toolbox.call(name, **args) if isinstance(args, dict) else \
+                    toolbox.call(name)
+                if not result.ok:
+                    any_failed = True
+                if self.ledger:
+                    self.ledger.append(actor=f"agent:{self.role}", action=f"tool:{name}",
+                                       rationale=(result.error or "ok")[:80],
+                                       decision="PASS" if result.ok else "BLOCK")
+                observation = guardrails.sanitize_outbound(result.text())
+                if not result.ok:
+                    observation = f"[error] {result.error}\n(hint: fix the call or try another tool)"
+                messages.append(ChatMessage(role="user",
+                                            content=f"# TOOL RESULT ({name})\n{observation}"))
+
+            # Bounded error recovery: after repeated failures, stop looping on tools.
+            consecutive_failures = consecutive_failures + 1 if any_failed else 0
+            if consecutive_failures >= 2:
+                messages.append(ChatMessage(
+                    role="user",
+                    content="# NOTE\nTools keep failing — answer from what you already have."))
 
         safe_text, out_findings = _output_guard(last_text, messages[0].content)
         return AgentResult(
@@ -223,18 +271,19 @@ class Agent:
         )
 
     @staticmethod
-    def _parse_tool_call(text: str):
-        """Parse a `CALL <tool> <json>` directive; return (name, args) or None."""
+    def _parse_tool_calls(text: str) -> list:
+        """Parse one or more `CALL <tool> <json>` directives from text."""
         import json
 
-        m = re.search(r"^\s*CALL\s+([\w.\-]+)\s+(\{.*\})\s*$", text, re.MULTILINE | re.DOTALL)
-        if not m:
-            return None
-        try:
-            args = json.loads(m.group(2))
-            return (m.group(1), args) if isinstance(args, dict) else None
-        except (ValueError, TypeError):
-            return None
+        calls = []
+        for m in re.finditer(r"^\s*CALL\s+([\w.\-]+)\s+(\{.*?\})\s*$", text or "", re.MULTILINE):
+            try:
+                args = json.loads(m.group(2))
+            except ValueError:
+                continue
+            if isinstance(args, dict):
+                calls.append({"name": m.group(1), "arguments": args})
+        return calls
 
     # -- parsing helpers -----------------------------------------------------
     @staticmethod
