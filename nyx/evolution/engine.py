@@ -137,34 +137,21 @@ class EvolutionEngine:
 
     # -- benchmark -----------------------------------------------------------
     def _default_benchmark(self, agent: Agent) -> float:
-        """Reference benchmark: score a genome on a small suite.
-
-        Combines (a) how the produced *artifact* looks and (b) how well the
-        genome's *charter* encodes the engineering doctrine and uses a sensible
-        temperature. Replace this with SWE-bench-style tasks or your product
-        KPIs for a live factory; the admission mechanics are identical.
+        """Default fitness. For the coder role this is **executed** correctness:
+        the agent's code is run against hidden tests in the sandbox (real signal,
+        no keyword theater). Non-executable roles (reviewer, planner, …) fall back
+        to charter/doctrine quality, which is the only signal they have. A small
+        genome-quality term breaks ties without letting keywords dominate.
         """
-        tasks = [
-            "sum a list of numbers safely",
-            "validate and parse a numeric config",
-            "compute a moving average over a window",
-        ]
-        artifact_scores = []
-        for t in tasks:
-            text = agent.run(t).text
-            low = text.lower()
-            s = 0.0
-            s += 0.30 if ("valid" in low or "raise" in low) else 0.0
-            s += 0.25 if "```" in text else 0.0
-            s += 0.20 if "def " in text else 0.0
-            s += 0.15 if not scan_secrets(text) else 0.0
-            s += 0.10 if not self.constitution.check_forbidden(text) else 0.0
-            artifact_scores.append(s)
-        artifact = sum(artifact_scores) / len(artifact_scores)
-        genome = self._genome_quality(agent.genome)
-        # Mock artifacts are constant, so the genome term carries the gradient;
-        # with a real brain the artifact term dominates instead.
-        return round(0.3 * artifact + 0.7 * genome, 4)
+        if self.role == "coder":
+            from .benchmarks import default_swebench_suite
+
+            executed = default_swebench_suite()(agent)          # fraction of tests passing
+            genome = self._genome_quality(agent.genome)
+            return round(0.85 * executed + 0.15 * genome, 4)    # reality dominates
+
+        # Non-coder roles: score the charter's doctrine + sane temperature.
+        return self._genome_quality(agent.genome)
 
     @staticmethod
     def _genome_quality(genome: Genome) -> float:

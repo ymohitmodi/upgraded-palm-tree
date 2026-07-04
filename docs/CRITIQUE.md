@@ -36,25 +36,26 @@ become real.
    a mock coder variant that referenced un‑imported modules and had never
    actually run — the definition of theater.)
 
-2. **Evolution is mostly a keyword game.** The software fitness function is ~70%
-   "does the charter contain doctrine words," and the value fitness maps a genome
-   to factor weights by counting phrases. So "evolution" largely rediscovers the
-   doctrine we already seed. It is *not yet* meaningfully improving capability.
-   The mechanism (Darwin-Gödel archive, no-regression admission) is sound; the
-   **fitness signal is weak**. Real evolution must score genomes on *executed task
-   success* — the SWE-bench harness and the value backtest are the two honest
-   signals; everything else should be retired.
+2. **Evolution is mostly a keyword game.** *(Fixed for the coder role.)* The
+   coder fitness is now the **executed** SWE-bench pass-rate (0.85 weight) with a
+   small genome tiebreaker — genomes are scored on code that actually runs, not on
+   doctrine words. The value fitness uses the executed backtest. Remaining: the
+   value factor-weight mapping is still a proxy when offline (LLM-derived live),
+   and non-executable roles (reviewer/planner) still fall back to charter quality
+   because they have no runnable artifact.
 
-3. **"Semantic" memory is lexical.** The embeddings are a character-n-gram hashing
-   vectorizer — better than keyword overlap, but it is not semantic. Two passages
-   that share meaning but no words won't match. Real semantic recall needs true
-   embeddings (the Ollama embed endpoint; the `ProviderEmbedder` seam exists but
-   is unused by default).
+3. **"Semantic" memory was lexical.** *(Fixed.)* Real embeddings are wired: a live
+   provider supplies semantic vectors via `ProviderEmbedder` (Ollama
+   `/v1/embeddings`), selected automatically by `embedder_for`; the hashing
+   embedder remains the deterministic offline fallback.
 
-4. **The software factory never validates the product.** It "ships" artifacts it
-   (until now) never ran, never deploys anything real, and has no user/market
-   feedback. `deploy`/`operate` are narrative. There is no outer loop connecting
-   NYX's output to reality (did the feature work? did anyone pay?).
+4. **The factory didn't validate its work → now it does, and feeds it back.**
+   *(Substantially fixed.)* All five gates are execution/scan/ledger-verified, and
+   realized outcomes now flow back as a **track record** (`kind="track-record"`,
+   trusted): the value backtest's realized risk-adjusted return per decision, and
+   a "shipped through execution-verified gates" record for software (`nyx track`).
+   Still missing: a *market* signal (did anyone pay?) and live paper-trading over
+   real time rather than the backtest as ground truth.
 
 5. **The agentic loop is shallow.** `run_with_tools` is 3-step ReAct with a regex
    `CALL` protocol, no native function-calling, no error-recovery/retry, no
@@ -116,9 +117,11 @@ Sell the outcome (a monitored, improving, auditable analyst), not the framework.
 ## Bottom line
 
 The architecture is genuinely good: modular capabilities, one governed loop,
-Darwin-Gödel evolution, three-layer memory, a constitution, and now **executed
-verification**. The scaffolding is real. What's thin is the *signal* — fitness,
-embeddings, and outcome feedback are proxies today. Convert those three proxies
-into measured reality and NYX stops being an impressive demo and becomes a system
-that compounds — which is the only way it earns the right to the "next big thing"
-claim.
+Darwin-Gödel evolution, three-layer memory, a constitution, executed
+verification, and now — after closing the three "signal" gaps — **executed
+fitness, real embeddings, and an outer feedback loop** (a track record of
+realized outcomes). The remaining honest gaps are narrower: a *market/payment*
+signal, live paper-trading over real time, a deeper agent loop, and a standing
+eval harness that charts "it got better this week." Those are product and
+longitudinal-data problems now, not architectural ones — which is exactly the
+position from which a system earns the right to compound.

@@ -48,6 +48,13 @@ class MockProvider:
     def __init__(self, config: Config | None = None):
         self.config = config
 
+    def embed(self, model: str, text: str) -> list[float]:
+        """Deterministic offline embedding (exercises the provider-embeddings
+        path without a network); real semantics come from a live provider."""
+        from ..embeddings import HashingEmbedder
+
+        return HashingEmbedder(dim=256).embed(text)
+
     def chat(
         self,
         model: str,

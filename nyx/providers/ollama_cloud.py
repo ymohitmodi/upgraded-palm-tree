@@ -60,6 +60,26 @@ class OllamaCloudProvider:
             raw=data,
         )
 
+    def embed(self, model: str, text: str) -> list[float]:  # pragma: no cover - network
+        """Return a semantic embedding vector from Ollama Cloud's /v1/embeddings."""
+        url = f"{self.config.ollama_host}/v1/embeddings"
+        payload = {"model": model, "input": text}
+        body = json.dumps(payload).encode("utf-8")
+        try:
+            import requests  # type: ignore
+
+            resp = requests.post(url, data=body, headers=self._headers(), timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+        except ImportError:
+            req = urllib.request.Request(url, data=body, headers=self._headers(), method="POST")
+            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 (trusted host)
+                data = json.loads(resp.read().decode("utf-8"))
+        try:
+            return list(data["data"][0]["embedding"])
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ProviderError(f"unexpected embeddings shape: {data!r}") from exc
+
     # -- transport -----------------------------------------------------------
     def _headers(self) -> dict[str, str]:
         return {

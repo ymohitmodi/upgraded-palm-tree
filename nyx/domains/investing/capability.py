@@ -133,9 +133,14 @@ class ValueInvestingCapability(Capability):
                 f"filings. Risk-adjusted score {res.score:+.4f}; no guarantees.")
         violations = check_investing(memo)
         ok = not violations
+        # Outer feedback loop: record the REALIZED risk-adjusted return of the
+        # picks (the backtest is the ground-truth outcome) as a trusted track
+        # record, so performance — not opinion — accumulates and is recalled.
         lessons = [(
-            f"Decision for '{task}': picks {res.picks[:5]} score {res.score:+.4f}",
-            "pattern", ["investing", "decision"],
+            f"TRACK RECORD — '{task[:50]}': picks {res.picks[:5]} realized "
+            f"risk-adjusted return {res.score:+.4f} (portfolio {res.portfolio_return:+.2%}, "
+            f"downside {res.downside:+.2%}).",
+            "track-record", ["investing", "track-record", "realized"],
         )]
         return CycleResult(
             item=task, ok=ok, summary=memo, score=res.score,

@@ -36,6 +36,7 @@ class Config:
     model_coder: str = "qwen3.5-coder:480b-cloud"
     model_reviewer: str = "glm-5.1:cloud"
     model_fast: str = "gemma4:cloud"
+    model_embed: str = "nomic-embed-text"   # semantic memory embeddings
 
     # Factory behavior
     fanout: int = 3
@@ -106,6 +107,7 @@ def load_config(dotenv: bool = True) -> Config:
         model_coder=os.environ.get("NYX_MODEL_CODER", "qwen3.5-coder:480b-cloud"),
         model_reviewer=os.environ.get("NYX_MODEL_REVIEWER", "glm-5.1:cloud"),
         model_fast=os.environ.get("NYX_MODEL_FAST", "gemma4:cloud"),
+        model_embed=os.environ.get("NYX_MODEL_EMBED", "nomic-embed-text"),
         fanout=_int("NYX_FANOUT", 3),
         autonomy=os.environ.get("NYX_AUTONOMY", "supervised").lower(),
         max_calls=_int("NYX_MAX_CALLS", 200),

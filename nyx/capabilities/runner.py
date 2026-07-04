@@ -69,7 +69,12 @@ class CapabilityRunner:
         self.config = config or load_config()
         self.provider = provider or build_provider(self.config)
         self.ledger = ledger or AuditLedger(self.config.ledger_path)
-        self.memory = memory if memory is not None else MemoryStore(self.config.memory_path)
+        if memory is not None:
+            self.memory = memory
+        else:
+            from ..embeddings import embedder_for
+            self.memory = MemoryStore(self.config.memory_path,
+                                      embedder=embedder_for(self.config, self.provider))
         self.archive = archive if archive is not None else Archive(self.config.evolution_archive)
         self.metrics = Metrics()
         base = Constitution.load(self.config.constitution_path, mode=self.config.constitution_mode)

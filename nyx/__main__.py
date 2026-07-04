@@ -289,6 +289,22 @@ def cmd_read(args) -> int:
     return 0
 
 
+def cmd_track(args) -> int:
+    """Show the accumulated track record — realized outcomes fed back as memory."""
+    from .memory import MemoryStore
+
+    cfg = load_config()
+    store = MemoryStore(cfg.memory_path)
+    records = [x for x in store.all() if x.kind == "track-record"]
+    if not records:
+        print("No track record yet. Run `nyx run` to accumulate realized outcomes.")
+        return 0
+    print(f"Track record ({len(records)} entries):")
+    for r in records[: args.tail]:
+        print(f"  [w={r.weight:>4}] {r.text[:110]}")
+    return 0
+
+
 def cmd_security_audit(args) -> int:
     """Audit NYX against OWASP LLM Top 10 + Agentic AI threats for this config."""
     from .security.policy import audit
@@ -529,6 +545,10 @@ def build_parser() -> argparse.ArgumentParser:
     rd.add_argument("source", help="http(s) URL or local file path")
     rd.add_argument("--query", help="optional question to retrieve specific sections")
     rd.set_defaults(func=cmd_read)
+
+    tr = sub.add_parser("track", help="show the realized-outcome track record")
+    tr.add_argument("--tail", type=int, default=20)
+    tr.set_defaults(func=cmd_track)
 
     sa = sub.add_parser("security-audit", help="audit against OWASP LLM + Agentic threats")
     sa.set_defaults(func=cmd_security_audit)

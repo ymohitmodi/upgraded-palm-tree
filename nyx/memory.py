@@ -312,11 +312,15 @@ def reflect_on_run(result, store: MemoryStore) -> list[Lesson]:
         )
 
     if result.shipped:
+        # Outer feedback loop: this pattern shipped through gates that were
+        # verified against REALITY (tests executed, code scanned) — not
+        # self-graded — so it is a trustworthy positive signal to reinforce.
         learned.append(
             store.remember(
-                f"Pattern that shipped cleanly: gated pipeline for '{result.intent}' "
-                "(spec → fan-out build → security co-sign → tests → reversible deploy).",
-                kind="pattern", tags=intent_tags, source="run:shipped", weight=0.8,
+                f"TRACK RECORD — shipped '{result.intent}': passed execution-verified "
+                "tests and scanned security through the gated pipeline.",
+                kind="track-record", tags=intent_tags + ["shipped", "verified"],
+                source="run:shipped", weight=0.9,
             )
         )
     return learned

@@ -84,3 +84,11 @@ class ProviderEmbedder:
 
 def default_embedder() -> Embedder:
     return HashingEmbedder()
+
+
+def embedder_for(config, provider) -> Embedder:
+    """Pick the best available embedder: real semantic embeddings from a live
+    provider, else the deterministic offline hashing embedder."""
+    if provider is not None and hasattr(provider, "embed") and not getattr(config, "mock_mode", True):
+        return ProviderEmbedder(provider, getattr(config, "model_embed", "nomic-embed-text"))
+    return HashingEmbedder()
