@@ -120,8 +120,11 @@ The architecture is genuinely good: modular capabilities, one governed loop,
 Darwin-Gödel evolution, three-layer memory, a constitution, executed
 verification, and now — after closing the three "signal" gaps — **executed
 fitness, real embeddings, and an outer feedback loop** (a track record of
-realized outcomes). The remaining honest gaps are narrower: a *market/payment*
-signal, live paper-trading over real time, a deeper agent loop, and a standing
-eval harness that charts "it got better this week." Those are product and
-longitudinal-data problems now, not architectural ones — which is exactly the
+realized outcomes). The **standing eval harness now exists** (`nyx eval`): held-out,
+contamination-controlled score per capability, tracked over time — and it already
+shows the evolved analyst beating its seed on universes it never trained on
+(−0.31 → +0.17). The remaining honest gaps are narrower still: a *market/payment*
+signal, live paper-trading over real time, and a deeper agent loop
+(native function-calling, error recovery, sub-goal planning). Those are product
+and longitudinal-data problems now, not architectural ones — which is exactly the
 position from which a system earns the right to compound.

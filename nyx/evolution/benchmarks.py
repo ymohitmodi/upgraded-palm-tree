@@ -122,3 +122,32 @@ def default_swebench_suite() -> SWEBenchSuite:
             ),
         ]
     )
+
+
+def heldout_swebench_suite() -> SWEBenchSuite:
+    """A **held-out** suite (distinct tasks) for standing evaluation, so the eval
+    score is not contaminated by the tasks evolution trained on."""
+    return SWEBenchSuite(
+        [
+            BenchmarkTask(
+                id="ho_sum",
+                prompt="Implement `feature(items)` that returns the total of a list of numbers.",
+                test_code="assert feature([4, 5, 6]) == 15\nassert feature([]) == 0",
+            ),
+            BenchmarkTask(
+                id="ho_sum_singleton",
+                prompt="Implement `feature(items)` that returns the sum of the list.",
+                test_code="assert feature([10]) == 10",
+            ),
+            BenchmarkTask(
+                id="ho_min",
+                prompt="Implement `feature(items)` that returns the minimum value in a list.",
+                test_code="assert feature([3, 9, 2]) == 2",
+            ),
+            BenchmarkTask(
+                id="ho_length",
+                prompt="Implement `feature(items)` that returns the number of elements.",
+                test_code="assert feature([1, 1, 1]) == 3",
+            ),
+        ]
+    )

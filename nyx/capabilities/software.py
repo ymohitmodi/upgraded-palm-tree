@@ -9,7 +9,7 @@ import re
 
 from ..agents.roles import build_agent
 from ..factory.orchestrator import Factory
-from .base import Capability, CycleContext, CycleResult
+from .base import Capability, CycleContext, CycleResult, EvalResult
 
 
 class SoftwareFactoryCapability(Capability):
@@ -38,6 +38,20 @@ class SoftwareFactoryCapability(Capability):
         from ..domains.solopreneur import seed_principles
 
         return seed_principles(memory)
+
+    def eval(self, config, provider) -> EvalResult:
+        from ..constitution import Constitution
+        from ..evolution.archive import Archive
+        from ..evolution.benchmarks import heldout_swebench_suite
+        from ..observability.metrics import Metrics
+
+        best = Archive(config.evolution_archive).best_for("coder")
+        genome = best.to_genome() if best else None
+        const = Constitution.load(config.constitution_path, mode=config.constitution_mode)
+        agent = build_agent("coder", config, provider, const, metrics=Metrics(), genome=genome)
+        score = heldout_swebench_suite()(agent)
+        return EvalResult(score=score,
+                          detail=f"held-out SWE-bench, {'evolved' if best else 'seed'} coder")
 
     def execute(self, task: str, ctx: CycleContext) -> CycleResult:
         factory = Factory(config=ctx.config, provider=ctx.provider,

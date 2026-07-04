@@ -51,6 +51,18 @@ class ValueInvestingCapability(Capability):
     def evolve_role(self) -> str:
         return "analyst"
 
+    def eval(self, config, provider):
+        from ...capabilities.base import EvalResult
+        from ...evolution.archive import Archive
+        from ..investing.backtest import ValueBenchmark, heldout_universes
+
+        best = Archive(config.evolution_archive).best_for("analyst")
+        genome = best.to_genome() if best else None
+        res = ValueBenchmark(universes=heldout_universes(),
+                             config=config, provider=provider).evaluate(genome)
+        return EvalResult(score=res.score,
+                          detail=f"held-out value walk-forward, {'evolved' if best else 'seed'} analyst")
+
     def directives(self):
         return INVESTING_DIRECTIVES
 

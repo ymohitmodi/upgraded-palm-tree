@@ -57,6 +57,8 @@ class Config:
 
     # Memory (semantic lessons)
     memory_path: str = ".nyx/memory.jsonl"
+    # Standing evaluation score history (held-out suites over time)
+    eval_history: str = ".nyx/evals.jsonl"
     # Working-memory compaction: max chars of context carried between stages.
     context_char_budget: int = 4000
     # Consolidation ("sleep"): run a consolidation pass every N build cycles.
@@ -118,6 +120,7 @@ def load_config(dotenv: bool = True) -> Config:
         ledger_path=os.environ.get("NYX_LEDGER", ".nyx/audit.ledger.jsonl"),
         log_level=os.environ.get("NYX_LOG_LEVEL", "INFO").upper(),
         memory_path=os.environ.get("NYX_MEMORY", ".nyx/memory.jsonl"),
+        eval_history=os.environ.get("NYX_EVAL_HISTORY", ".nyx/evals.jsonl"),
         context_char_budget=int(os.environ.get("NYX_CONTEXT_BUDGET", "4000")),
         consolidate_every=int(os.environ.get("NYX_CONSOLIDATE_EVERY", "5")),
         user_agent=os.environ.get(

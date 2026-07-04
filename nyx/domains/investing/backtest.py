@@ -98,6 +98,12 @@ def default_universes(seeds: tuple[int, ...] = (7, 11, 13)) -> list[Universe]:
     return [default_universe(seed=s) for s in seeds]
 
 
+def heldout_universes(seeds: tuple[int, ...] = (101, 103, 107)) -> list[Universe]:
+    """Held-out universes (seeds disjoint from the training set) for standing
+    evaluation — the eval score is not contaminated by training data."""
+    return [default_universe(seed=s) for s in seeds]
+
+
 def _z(values: list[float]) -> list[float]:
     n = len(values)
     mean = sum(values) / n

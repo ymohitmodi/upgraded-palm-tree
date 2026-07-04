@@ -289,6 +289,33 @@ def cmd_read(args) -> int:
     return 0
 
 
+def cmd_eval(args) -> int:
+    """Run held-out evaluations, record the score, and show the trend over time."""
+    from .evaluation import EvalHarness
+
+    cfg = load_config()
+    print(_banner(cfg) + "\n")
+    harness = EvalHarness(cfg)
+    if args.history:
+        from .capabilities import all_capabilities
+
+        for cap in all_capabilities():
+            hist = harness.history(cap.name)
+            if hist:
+                series = "  ".join(f"{r.score:.3f}" for r in hist[-8:])
+                print(f"{cap.name:16s} {harness.trend(cap.name)}  [{series}]")
+        return 0
+
+    print("Running held-out evaluations (contamination-controlled)…\n")
+    for rec in harness.run_all():
+        d = harness.delta(rec.capability)
+        arrow = "" if d is None else (f"  ({d:+.4f} vs last)" if d else "  (no change)")
+        print(f"  {rec.capability:16s} {rec.score:.4f}{arrow}   {rec.detail}")
+    print("\nHistory persisted to", cfg.eval_history, "— run again over time to see the trend "
+          "(`nyx eval --history`).")
+    return 0
+
+
 def cmd_track(args) -> int:
     """Show the accumulated track record — realized outcomes fed back as memory."""
     from .memory import MemoryStore
@@ -545,6 +572,10 @@ def build_parser() -> argparse.ArgumentParser:
     rd.add_argument("source", help="http(s) URL or local file path")
     rd.add_argument("--query", help="optional question to retrieve specific sections")
     rd.set_defaults(func=cmd_read)
+
+    ev = sub.add_parser("eval", help="run held-out evaluations + show score trend over time")
+    ev.add_argument("--history", action="store_true", help="show recorded trend, don't run")
+    ev.set_defaults(func=cmd_eval)
 
     tr = sub.add_parser("track", help="show the realized-outcome track record")
     tr.add_argument("--tail", type=int, default=20)

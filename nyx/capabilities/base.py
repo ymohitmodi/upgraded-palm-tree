@@ -43,6 +43,13 @@ class CycleContext:
 
 
 @dataclass
+class EvalResult:
+    """A capability's score on its held-out evaluation suite."""
+    score: float
+    detail: str = ""
+
+
+@dataclass
 class CycleResult:
     item: str
     ok: bool = True
@@ -105,3 +112,8 @@ class Capability(ABC):
     @abstractmethod
     def execute(self, task: str, ctx: CycleContext) -> CycleResult:
         """Do the work for one backlog item and (for investing) make a decision."""
+
+    def eval(self, config, provider) -> "EvalResult | None":
+        """Score the current best genome on a HELD-OUT suite for standing
+        evaluation (contamination-controlled). None = not objectively scorable."""
+        return None
