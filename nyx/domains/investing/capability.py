@@ -97,7 +97,7 @@ class ValueInvestingCapability(Capability):
         if r.ok:
             ctx.memory.remember(f"SEC facts read for {ticker}: {r.text(400)}",
                                 kind="lesson", tags=["sec", ticker.lower(), "fundamentals"],
-                                source="edgar")
+                                source="edgar", trusted=False)  # external → not doctrine
             stats["filings"] = 1
             stats["live"] = True
 
@@ -110,7 +110,7 @@ class ValueInvestingCapability(Capability):
         if rd.ok and rd.data.strip():
             ctx.memory.remember(f"10-K digest for {ticker}: {rd.text(1500)}",
                                 kind="research", tags=["sec", ticker.lower(), "10-k", "filing"],
-                                source=idx_url, weight=1.5)
+                                source=idx_url, weight=1.5, trusted=False)  # external
             stats["digested"] = stats.get("digested", 0) + 1
             stats["live"] = True
         return stats

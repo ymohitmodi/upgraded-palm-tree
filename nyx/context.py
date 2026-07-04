@@ -135,8 +135,14 @@ def digest_to_memory(memory, text: str, *, source: str, tags: list[str],
     """
     reader = LongDocReader(config, provider, chunk_chars=chunk_chars)
     digest = reader.read(text, source=source)
-    memory.remember(f"RESEARCH — {source}: {digest.synthesis}",
-                    kind="research", tags=tags, source=source, weight=1.5)
+    # External content is UNTRUSTED: injection-screen the synthesis and store it
+    # trusted=False so it can inform but never become governing doctrine.
+    from .security.injection_classifier import classify_injection, neutralize
+
+    verdict = classify_injection(digest.synthesis, config, provider)
+    body = neutralize(digest.synthesis, verdict)
+    memory.remember(f"RESEARCH — {source}: {body}",
+                    kind="research", tags=tags, source=source, weight=1.5, trusted=False)
     memory._flush()
     return digest
 

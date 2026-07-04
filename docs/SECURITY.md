@@ -67,9 +67,30 @@ but cannot reach arbitrary tools. **SSRF guard in practice:** on the live networ
 the crawler refuses any host that resolves to an internal or cloud-metadata
 address, the standard defense against a poisoned URL exfiltrating credentials.
 
+### Memory poisoning & output disclosure (added)
+
+- **Memory poisoning (Agentic T1 / LLM04+08).** Every externally-sourced memory
+  (fetched pages, filings, letters, tool output) is stored `trusted=False`,
+  injection-screened first, **capped short-term, down-ranked at recall, and
+  excluded from doctrine consolidation** — so poisoned external text can never
+  become a governing long-term principle. Only curated/internal lessons form
+  doctrine. (`nyx/memory.py`, `nyx/context.py`)
+- **Output disclosure (LLM02 / LLM07).** Agent *output* is scanned: named
+  credential patterns are redacted from the artifact, and verbatim leakage of the
+  system preamble is flagged. (`nyx/agents/base.py:_output_guard`)
+
+### Self-audit
+
+Run **`nyx security-audit`** to see every control mapped to the **OWASP LLM Top
+10 (2025)** and the **OWASP Agentic AI threats**, with live-config checks and an
+honest ENFORCED / PARTIAL / ADVISORY status per control
+([`nyx/security/policy.py`](../nyx/security/policy.py)).
+
 Honest scope: this is defense-in-depth to a strong current standard, not a proof
-of safety. The injection detector is a heuristic filter; a live LLM injection
-classifier and per-tool argument schemas are the next hardening step.
+of safety. Known PARTIALs today: injection detection is heuristic offline (LLM
+classifier needs a key); embeddings are lexical (real embeddings pending);
+misinformation/goal-manipulation defenses are gate- and constitution-based, not
+exhaustive; only the test gate is execution-verified so far.
 
 ## Responsible use
 

@@ -51,6 +51,7 @@ class Lesson:
     weight: float = 1.0           # reinforced when re-learned, decays when stale
     uses: int = 0                 # times recalled/applied
     tier: str = "short_term"      # short_term -> consolidated into long_term
+    trusted: bool = True          # False for externally-sourced content (anti-poisoning)
     ts: float = field(default_factory=time.time)        # first learned
     last_used: float = field(default_factory=time.time)  # last reinforced/recalled
 
@@ -111,19 +112,27 @@ class MemoryStore:
         tags: list[str] | None = None,
         source: str = "",
         weight: float = 1.0,
+        trusted: bool = True,
     ) -> Lesson:
-        """Store a lesson; if already known, reinforce it instead of duplicating."""
+        """Store a lesson; if already known, reinforce it instead of duplicating.
+
+        ``trusted=False`` marks externally-sourced content (fetched pages, filings,
+        tickets). Untrusted memories are capped short-term and never form long-term
+        doctrine, so poisoned external text cannot become a governing principle
+        (OWASP Agentic T1 memory poisoning / LLM04)."""
         text = text.strip()
         lid = _lesson_id(text, kind)
         existing = self.lessons.get(lid)
         if existing:
             existing.weight = round(existing.weight + weight * 0.5, 3)
             existing.last_used = time.time()
+            existing.trusted = existing.trusted or trusted  # a trusted source can vouch
             if tags:
                 existing.tags = sorted(set(existing.tags) | set(tags))
         else:
             self.lessons[lid] = Lesson(
-                id=lid, text=text, kind=kind, tags=tags or [], source=source, weight=weight
+                id=lid, text=text, kind=kind, tags=tags or [], source=source,
+                weight=weight, trusted=trusted,
             )
         self._vecs.pop(lid, None)  # invalidate cached vector on write
         self._flush()
@@ -158,7 +167,8 @@ class MemoryStore:
             lexical = len(overlap) / len(q | lesson.tokenset()) if overlap else 0.0
             rel = 0.7 * sim + 0.3 * lexical if qvec else lexical
             tier_boost = 1.5 if lesson.tier == "long_term" else 1.0
-            scored.append((rel * lesson.weight * tier_boost, lesson))
+            trust_boost = 1.0 if lesson.trusted else 0.6   # curated doctrine ranks first
+            scored.append((rel * lesson.weight * tier_boost * trust_boost, lesson))
         scored.sort(key=lambda x: x[0], reverse=True)
         top = [lesson for _, lesson in scored[:k]]
         now = time.time()
@@ -215,9 +225,11 @@ class MemoryStore:
                 decayed += 1
 
         # 2. Abstract recurring themes (shared, non-generic tag) into principles.
+        #    ONLY trusted lessons form doctrine — untrusted external content can
+        #    never become a governing long-term principle (anti-poisoning).
         theme_members: dict[str, list[Lesson]] = {}
         for lesson in self.lessons.values():
-            if lesson.tier == "long_term":
+            if lesson.tier == "long_term" or not lesson.trusted:
                 continue
             for tag in lesson.tags:
                 t = tag.lower()
@@ -250,9 +262,9 @@ class MemoryStore:
                 absorbed.add(m.id)
                 m.weight = round(m.weight * 0.4, 4)
 
-        # 3. Promote heavily-used short-term lessons to long-term.
+        # 3. Promote heavily-used short-term lessons to long-term — trusted only.
         for lesson in self.lessons.values():
-            if lesson.tier != "long_term" and lesson.uses >= promote_uses:
+            if lesson.tier != "long_term" and lesson.trusted and lesson.uses >= promote_uses:
                 lesson.tier = "long_term"
                 promoted += 1
 

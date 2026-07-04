@@ -87,9 +87,11 @@ def fetch_letters(fetcher, memory, *, start: int = 1977, end: int = 2024, excerp
                 skipped += 1
                 continue
             text = f"Berkshire {year} shareholder letter (source: {url}): {doc.text[:excerpt]}"
-            lesson = memory.remember(text, kind="principle",
-                                     tags=["buffett", "letter", str(year)], source=url, weight=1.5)
-            lesson.tier = "long_term"
+            # Fetched primary source → UNTRUSTED: recallable, but not forced into
+            # long-term doctrine (curated PRINCIPLES carry the trusted doctrine).
+            memory.remember(text, kind="research",
+                            tags=["buffett", "letter", str(year)], source=url,
+                            weight=1.5, trusted=False)
             fetched += 1
         except Exception:  # noqa: BLE001 — best effort; never stall the loop
             skipped += 1

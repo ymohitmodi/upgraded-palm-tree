@@ -289,6 +289,26 @@ def cmd_read(args) -> int:
     return 0
 
 
+def cmd_security_audit(args) -> int:
+    """Audit NYX against OWASP LLM Top 10 + Agentic AI threats for this config."""
+    from .security.policy import audit
+
+    cfg = load_config()
+    print(_banner(cfg) + "\n")
+    report = audit(cfg)
+    for c in report["controls"]:
+        mark = {"ENFORCED": "✓", "PARTIAL": "◐", "ADVISORY": "!"}.get(c.status, "?")
+        print(f"  {mark} {c.id:8s} {c.status:8s} {c.name}")
+        note = report["notes"].get(c.id)
+        if note:
+            print(f"      ↳ {note}")
+    s = report["summary"]
+    print(f"\n{s['enforced']}/{s['total']} enforced, {s['partial']} partial, "
+          f"{s['advisory']} advisory.")
+    print("See docs/SECURITY.md for the full mapping and honest scope.")
+    return 0
+
+
 def cmd_mcp_init(args) -> int:
     """Write a starter MCP manifest registering the SEC EDGAR server."""
     from .tools.mcp import write_sample_manifest
@@ -509,6 +529,9 @@ def build_parser() -> argparse.ArgumentParser:
     rd.add_argument("source", help="http(s) URL or local file path")
     rd.add_argument("--query", help="optional question to retrieve specific sections")
     rd.set_defaults(func=cmd_read)
+
+    sa = sub.add_parser("security-audit", help="audit against OWASP LLM + Agentic threats")
+    sa.set_defaults(func=cmd_security_audit)
 
     mi = sub.add_parser("mcp-init", help="write a starter MCP manifest (SEC EDGAR)")
     mi.set_defaults(func=cmd_mcp_init)

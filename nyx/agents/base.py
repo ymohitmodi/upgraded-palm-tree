@@ -16,7 +16,21 @@ from ..constitution import Constitution
 from ..observability.ledger import AuditLedger
 from ..observability.metrics import Metrics
 from ..providers.base import ChatMessage, Provider
-from ..security.guardrails import Guardrails
+from ..security.guardrails import Guardrails, redact_known_secrets, scan_secrets
+
+
+def _output_guard(text: str, system_content: str) -> tuple[str, list[str]]:
+    """Scrub leaked secrets from an agent's OUTPUT and flag prompt-leakage
+    (OWASP LLM02 sensitive-info disclosure, LLM07 system-prompt leakage)."""
+    findings: list[str] = []
+    if scan_secrets(text):
+        findings.append("output_secret_redacted")
+        text = redact_known_secrets(text)
+    # Detect verbatim leakage of the system preamble (a distinctive chunk of it).
+    probe = system_content[:160]
+    if len(probe) > 40 and probe in text:
+        findings.append("system_prompt_leak")
+    return text, findings
 
 # Markers role agents emit; the orchestrator turns these into constitutional claims.
 _CLAIM_MARKERS = {
@@ -133,7 +147,8 @@ class Agent:
 
         claims = self._extract_claims(completion.text)
         score = self._extract_score(completion.text)
-        findings = list(guardrails.findings)
+        text, out_findings = _output_guard(completion.text, messages[0].content)
+        findings = list(guardrails.findings) + out_findings
 
         if self.ledger:
             self.ledger.append(
@@ -146,7 +161,7 @@ class Agent:
 
         return AgentResult(
             role=self.role,
-            text=completion.text,
+            text=text,
             model=completion.model,
             claims=claims,
             score=score,
@@ -200,10 +215,11 @@ class Agent:
                 role="user",
                 content=f"# TOOL RESULT ({name})\n{guardrails.sanitize_outbound(result.text())}"))
 
+        safe_text, out_findings = _output_guard(last_text, messages[0].content)
         return AgentResult(
-            role=self.role, text=last_text, model=model,
+            role=self.role, text=safe_text, model=model,
             claims=self._extract_claims(last_text), score=self._extract_score(last_text),
-            findings=list(guardrails.findings),
+            findings=list(guardrails.findings) + out_findings,
         )
 
     @staticmethod

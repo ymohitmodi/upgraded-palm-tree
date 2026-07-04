@@ -70,6 +70,17 @@ def redact_secrets(text: str) -> str:
     return redacted
 
 
+def redact_known_secrets(text: str) -> str:
+    """Redact only *named* credential patterns (API keys, tokens, private keys).
+
+    Unlike ``redact_secrets`` this skips the high-entropy catch-all, so it scrubs
+    leaked keys from agent output without mangling legitimate base64/hex in code."""
+    redacted = text
+    for _, pat in _SECRET_PATTERNS:
+        redacted = pat.sub("[REDACTED]", redacted)
+    return redacted
+
+
 def detect_injection(text: str) -> list[str]:
     """Return descriptions of detected prompt-injection signals."""
     hits: list[str] = []
