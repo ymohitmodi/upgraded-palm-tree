@@ -6,6 +6,16 @@ from nyx.factory.orchestrator import Factory
 from nyx.factory.verify import verify_artifact, verify_security
 from nyx.providers.base import Completion
 
+# A structurally valid spec so runs pass G_SPEC and reach the gate under test.
+_VALID_SPEC = ("## Acceptance criteria\n- AC1: works end to end\n- AC2: inputs validated\n"
+               "## Non-goals\n- not building auth\nHAS_SPEC=true")
+_VALID_DEPLOY = "Strategy: blue/green, single-click rollback; reversible.\nDEPLOY_REVERSIBLE=true"
+
+
+def _role_of(messages) -> str:
+    sysmsg = next((m.content for m in messages if m.role == "system"), "")
+    return sysmsg.split("ROLE=", 1)[-1].split("\n", 1)[0].strip()
+
 
 def test_verify_security_flags_real_problems():
     assert verify_security("```python\ndef f(): return 1\n```").ok is True
@@ -24,8 +34,9 @@ def test_security_gate_vetoes_insecure_code_despite_self_claim(config, constitut
     class InsecureProvider:
         name = "insecure"
         def chat(self, model, messages, **kw):
-            sysmsg = next((m.content for m in messages if m.role == "system"), "")
-            role = sysmsg.split("ROLE=", 1)[-1].split("\n", 1)[0].strip()
+            role = _role_of(messages)
+            if role == "architect":
+                return Completion(text=_VALID_SPEC, model=model)
             if role == "coder":
                 return Completion(
                     text="```python\nimport os\ndef feature(items):\n"
@@ -38,6 +49,49 @@ def test_security_gate_vetoes_insecure_code_despite_self_claim(config, constitut
     result = factory.build("Add a sum utility", approver=lambda *_: True)
     assert result.blocked_at == "review"
     assert any("danger:os.system" in f for f in result.findings)
+
+
+def test_verify_spec_deploy_audit_units(tmp_path):
+    from nyx.factory.verify import verify_audit, verify_deploy, verify_spec
+    from nyx.observability.ledger import AuditLedger
+
+    assert verify_spec("## Acceptance criteria\n- AC1\n## Non-goals\n- none").ok
+    assert not verify_spec("just some prose with no structure").ok
+    assert verify_deploy("blue/green with single-click rollback").ok
+    assert not verify_deploy("we will ship it and hope").ok
+
+    ledger = AuditLedger(tmp_path / "l.jsonl")
+    for _ in range(4):
+        ledger.append("t", "a", decision="INFO")
+    assert verify_audit(ledger, 4).ok                 # chain intact + entries
+    assert not verify_audit(ledger, 0).ok             # no entries this run
+
+    class BrokenLedger:
+        def verify(self):
+            return False
+    assert not verify_audit(BrokenLedger(), 10).ok    # tampered chain vetoes
+
+
+def test_missing_spec_structure_blocks_at_design(config, constitution_path):
+    """An agent that claims HAS_SPEC=true but writes no acceptance criteria is
+    blocked at G_SPEC — the design gate is structurally verified."""
+    const = Constitution.load(constitution_path, mode="block")
+    config.autonomy = "autonomous"
+    config.fanout = 1
+
+    class NoSpecProvider:
+        name = "nospec"
+        def chat(self, model, messages, **kw):
+            role = _role_of(messages)
+            if role == "architect":
+                return Completion(text="We'll build something nice.\nHAS_SPEC=true", model=model)
+            return Completion(text="HAS_SPEC=true\nSECURITY_OK=true\n"
+                                   "DEPLOY_REVERSIBLE=true\nAUDITED=true", model=model)
+
+    factory = Factory(config=config, provider=NoSpecProvider(), constitution=const)
+    result = factory.build("Add a thing", approver=lambda *_: True)
+    assert result.blocked_at == "design"
+    assert any("spec:" in f for f in result.findings)
 
 
 def test_verify_artifact_runs_real_tests():
@@ -73,8 +127,9 @@ def test_lying_tester_is_blocked_despite_self_claim(config, constitution_path):
     class LyingProvider:
         name = "lying"
         def chat(self, model, messages, **kw):
-            sysmsg = next((m.content for m in messages if m.role == "system"), "")
-            role = sysmsg.split("ROLE=", 1)[-1].split("\n", 1)[0].strip()
+            role = _role_of(messages)
+            if role == "architect":
+                return Completion(text=_VALID_SPEC, model=model)
             if role == "coder":
                 return Completion(text="```python\ndef feature(items):\n    return 0\n```",
                                   model=model)  # wrong implementation

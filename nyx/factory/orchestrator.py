@@ -146,6 +146,7 @@ class Factory:
     # -- run -----------------------------------------------------------------
     def build(self, intent: str, approver: Approver | None = None) -> FactoryResult:
         """Run the full pipeline for a feature/product intent."""
+        audit_start_seq = self.ledger._seq   # to prove this run wrote to the ledger
         self.ledger.append("factory", "run_start", rationale=intent, decision="INFO")
         result = FactoryResult(intent=intent)
         claims: dict[str, bool] = {}
@@ -188,6 +189,38 @@ class Factory:
                 primary = self._merge(primary, sec)
 
             claims.update(primary.claims)
+
+            # Every gate is verified against the artifact/ledger, not the agent's
+            # self-report. Scanners/checks can only VETO (fail-closed).
+            if stage == "design":
+                from .verify import verify_spec
+
+                sv = verify_spec(primary.text)
+                claims["has_spec"] = bool(claims.get("has_spec", False)) and sv.ok
+                result.findings.extend(sv.findings)
+                self.ledger.append("factory", "verify_spec",
+                                   rationale=("ok" if sv.ok else "; ".join(sv.findings))[:100],
+                                   decision="PASS" if sv.ok else "BLOCK")
+
+            if stage == "deploy":
+                from .verify import verify_deploy
+
+                dv = verify_deploy(primary.text)
+                claims["deploy_reversible"] = bool(claims.get("deploy_reversible", False)) and dv.ok
+                result.findings.extend(dv.findings)
+                self.ledger.append("factory", "verify_deploy",
+                                   rationale=("ok" if dv.ok else "; ".join(dv.findings))[:100],
+                                   decision="PASS" if dv.ok else "BLOCK")
+
+            if stage == "operate":
+                from .verify import verify_audit
+
+                av = verify_audit(self.ledger, self.ledger._seq - audit_start_seq)
+                claims["audited"] = bool(claims.get("audited", False)) and av.ok
+                result.findings.extend(av.findings)
+                self.ledger.append("factory", "verify_audit",
+                                   rationale=("ok" if av.ok else "; ".join(av.findings))[:100],
+                                   decision="PASS" if av.ok else "BLOCK")
 
             # Don't trust the security agent's self-graded SECURITY_OK: SCAN the
             # actual build code (secrets, injection, dangerous constructs) and let

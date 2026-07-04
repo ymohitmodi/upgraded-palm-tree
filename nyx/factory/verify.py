@@ -44,6 +44,46 @@ class SecurityVerdict:
     findings: list[str]
 
 
+_ACCEPT_RE = re.compile(r"acceptance criteria|\bAC\d|\bgiven\b.*\bthen\b", re.IGNORECASE)
+_NONGOAL_RE = re.compile(r"non[- ]?goal|out of scope|not (building|in scope|doing)", re.IGNORECASE)
+_REVERSIBLE_RE = re.compile(
+    r"roll ?back|revert|reversible|blue[- ]?green|canary|feature[- ]?flag|previous revision",
+    re.IGNORECASE)
+
+
+def verify_spec(artifact: str) -> SecurityVerdict:
+    """G_SPEC source: the design must actually contain acceptance criteria AND
+    non-goals — not just an agent asserting HAS_SPEC=true."""
+    findings = []
+    if not _ACCEPT_RE.search(artifact):
+        findings.append("spec:no acceptance criteria")
+    if not _NONGOAL_RE.search(artifact):
+        findings.append("spec:no non-goals/out-of-scope")
+    return SecurityVerdict(ok=not findings, findings=findings)
+
+
+def verify_deploy(artifact: str) -> SecurityVerdict:
+    """G_DEPLOY source: the release plan must describe a real reversibility /
+    rollback mechanism, not just assert DEPLOY_REVERSIBLE=true."""
+    ok = bool(_REVERSIBLE_RE.search(artifact))
+    return SecurityVerdict(ok=ok, findings=[] if ok else ["deploy:no rollback/reversibility described"])
+
+
+def verify_audit(ledger, entries_this_run: int, *, min_entries: int = 3) -> SecurityVerdict:
+    """G_AUDIT source: derive `audited` from the ledger itself — the hash chain
+    must verify (tamper-evident) and this run must have actually written entries
+    — instead of trusting the operator agent's AUDITED=true."""
+    findings = []
+    try:
+        if not ledger.verify():
+            findings.append("audit:ledger hash chain broken")
+    except Exception as exc:  # noqa: BLE001
+        findings.append(f"audit:verify failed ({exc})")
+    if entries_this_run < min_entries:
+        findings.append(f"audit:only {entries_this_run} ledger entries this run")
+    return SecurityVerdict(ok=not findings, findings=findings)
+
+
 def verify_security(artifact: str) -> SecurityVerdict:
     """Scan the produced code for real security problems — the authoritative
     source of ``security_ok``, so the G_SECURITY gate cannot be satisfied by an

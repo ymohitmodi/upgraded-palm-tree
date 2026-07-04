@@ -24,14 +24,17 @@ become real.
 
 ## What was theater (and the first one is now fixed)
 
-1. **Gates graded their own homework.** `G_TESTS` trusted a `TESTS_PASS=true`
-   string the tester wrote about itself. **Fixed:** `factory/verify.py` now
-   *executes* the build's code against the tester's tests in the sandbox and sets
-   the claim from reality; a lying tester is blocked. (Writing this immediately
-   exposed a mock coder variant that referenced un-imported modules and had never
-   actually run — the definition of theater.) **Still to do:** the other gates
-   (`G_SPEC`, `G_SECURITY`, `G_DEPLOY`, `G_AUDIT`) remain self-reported claims and
-   must be verified the same way.
+1. **Gates graded their own homework.** *(Fixed — all five gates now verified.)*
+   Gates used to trust claims the agents wrote about themselves. Now
+   `factory/verify.py` checks each against reality: `G_TESTS` **executes** the
+   code against the tests in the sandbox; `G_SECURITY` **scans** the code for
+   secrets/injection/dangerous constructs; `G_SPEC` requires structural
+   acceptance‑criteria + non‑goals; `G_DEPLOY` requires a described rollback;
+   `G_AUDIT` is derived from the **ledger** (hash chain intact + this run wrote
+   entries). Each is a fail‑closed veto over the agent's self‑claim, and each is
+   covered by a "lie is blocked" test. (Writing the first one immediately exposed
+   a mock coder variant that referenced un‑imported modules and had never
+   actually run — the definition of theater.)
 
 2. **Evolution is mostly a keyword game.** The software fitness function is ~70%
    "does the charter contain doctrine words," and the value fitness maps a genome
