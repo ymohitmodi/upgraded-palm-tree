@@ -42,7 +42,8 @@ _LLM = [
             "security/sandbox.py, tools/registry.py", ENFORCED),
     Control("LLM06", "Excessive agency",
             "Per-capability least-privilege tools; constitution gates; deploy gated to "
-            "autonomy + human approval; verified (not self-graded) test gate",
+            "autonomy + human approval; scanner-verified security gate + executed test gate "
+            "(neither self-graded)",
             "capabilities/*, constitution.py, factory/verify.py", ENFORCED),
     Control("LLM07", "System-prompt leakage",
             "System preamble kept minimal; output scanned for verbatim preamble leakage",
@@ -75,7 +76,8 @@ _AGENTIC = [
             "One mission budget; rate limits; bounded crawl/chunk/steps",
             "config.py, tools/web.py", ENFORCED),
     Control("AGT-T5", "Cascading hallucination",
-            "Verified test gate + fan-out judge; more gate verification pending",
+            "Executed test gate + scanner-verified security gate + fan-out judge; "
+            "spec/deploy/audit gate verification still pending",
             "factory/verify.py", PARTIAL),
     Control("AGT-T6", "Intent / goal manipulation",
             "Constitution forbidden list + injection defense on inputs",

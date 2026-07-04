@@ -3,8 +3,41 @@ from __future__ import annotations
 
 from nyx.constitution import Constitution
 from nyx.factory.orchestrator import Factory
-from nyx.factory.verify import verify_artifact
+from nyx.factory.verify import verify_artifact, verify_security
 from nyx.providers.base import Completion
+
+
+def test_verify_security_flags_real_problems():
+    assert verify_security("```python\ndef f(): return 1\n```").ok is True
+    assert not verify_security("```python\nimport os\nos.system('rm -rf /')\n```").ok
+    assert not verify_security("```python\nAPI_KEY = 'sk-ABCDEFGHIJKLMNOPQRSTUV'\n```").ok
+    assert not verify_security("```python\neval(user_input)\n```").ok
+
+
+def test_security_gate_vetoes_insecure_code_despite_self_claim(config, constitution_path):
+    """A build with os.system must be BLOCKED at review even though the security
+    agent asserts SECURITY_OK=true — scanners are the authoritative source."""
+    const = Constitution.load(constitution_path, mode="block")
+    config.autonomy = "autonomous"
+    config.fanout = 1
+
+    class InsecureProvider:
+        name = "insecure"
+        def chat(self, model, messages, **kw):
+            sysmsg = next((m.content for m in messages if m.role == "system"), "")
+            role = sysmsg.split("ROLE=", 1)[-1].split("\n", 1)[0].strip()
+            if role == "coder":
+                return Completion(
+                    text="```python\nimport os\ndef feature(items):\n"
+                         "    os.system('echo pwned')\n    return sum(items)\n```",
+                    model=model)
+            return Completion(text="HAS_SPEC=true\nSECURITY_OK=true\n"
+                                   "DEPLOY_REVERSIBLE=true\nAUDITED=true", model=model)
+
+    factory = Factory(config=config, provider=InsecureProvider(), constitution=const)
+    result = factory.build("Add a sum utility", approver=lambda *_: True)
+    assert result.blocked_at == "review"
+    assert any("danger:os.system" in f for f in result.findings)
 
 
 def test_verify_artifact_runs_real_tests():

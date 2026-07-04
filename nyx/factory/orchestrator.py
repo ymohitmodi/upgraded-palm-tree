@@ -189,6 +189,24 @@ class Factory:
 
             claims.update(primary.claims)
 
+            # Don't trust the security agent's self-graded SECURITY_OK: SCAN the
+            # actual build code (secrets, injection, dangerous constructs) and let
+            # the scanners VETO the gate (fail-closed) regardless of the claim.
+            if stage == "review":
+                from .verify import verify_security
+
+                build_art = next((s.artifact for s in result.stages if s.stage == "build"),
+                                 primary.text)
+                sv = verify_security(build_art)
+                claims["security_ok"] = bool(claims.get("security_ok", False)) and sv.ok
+                result.findings.extend(sv.findings)
+                self.ledger.append(
+                    "factory", "verify_security",
+                    rationale=("clean" if sv.ok else "; ".join(sv.findings))[:100],
+                    decision="PASS" if sv.ok else "BLOCK",
+                    data={"scanned": True, "findings": sv.findings},
+                )
+
             # Don't trust the tester's self-graded TESTS_PASS: actually EXECUTE
             # the build's code against the tester's tests in the sandbox and set
             # the claim from reality (fail-closed on a real failure).

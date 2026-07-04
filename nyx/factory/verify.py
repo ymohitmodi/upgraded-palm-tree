@@ -14,9 +14,21 @@ import re
 from dataclasses import dataclass
 
 from ..evolution.benchmarks import extract_code
+from ..security.guardrails import detect_injection, scan_secrets
 from ..security.sandbox import run_sandboxed
 
 _TESTish = re.compile(r"^\s*(def\s+test|assert\b|import\b|from\b|@)")
+
+# Dangerous code constructs a security review must never wave through.
+_DANGER = [
+    ("eval", re.compile(r"\beval\s*\(")),
+    ("exec", re.compile(r"\bexec\s*\(")),
+    ("os.system", re.compile(r"\bos\.system\s*\(")),
+    ("shell=True", re.compile(r"subprocess\.\w+\([^)]*shell\s*=\s*True")),
+    ("pickle.loads", re.compile(r"\bpickle\.loads\s*\(")),
+    ("unsafe_yaml", re.compile(r"\byaml\.load\s*\((?![^)]*Loader)")),
+    ("os_popen", re.compile(r"\bos\.popen\s*\(")),
+]
 
 
 @dataclass
@@ -24,6 +36,27 @@ class VerifyResult:
     ran: bool          # was there runnable code + tests to execute?
     passed: bool       # did execution succeed?
     detail: str = ""
+
+
+@dataclass
+class SecurityVerdict:
+    ok: bool
+    findings: list[str]
+
+
+def verify_security(artifact: str) -> SecurityVerdict:
+    """Scan the produced code for real security problems — the authoritative
+    source of ``security_ok``, so the G_SECURITY gate cannot be satisfied by an
+    agent merely asserting ``SECURITY_OK=true``.
+
+    Fail-closed: any secret, injection signal, or dangerous construct vetoes the
+    gate regardless of what the security agent claimed about itself."""
+    code = extract_code(artifact) or artifact
+    findings: list[str] = []
+    findings += [f"secret:{s}" for s in scan_secrets(code)]
+    findings += [f"injection:{i[:40]}" for i in detect_injection(code)]
+    findings += [f"danger:{name}" for name, pat in _DANGER if pat.search(code)]
+    return SecurityVerdict(ok=not findings, findings=findings)
 
 
 def _extract_tests(text: str) -> str:
