@@ -146,6 +146,15 @@ class MemoryStore:
         reinforcement weight and a long-term-memory preference. Falls back to pure
         keyword overlap if embedding is unavailable.
         """
+        return [lesson for lesson, _rel, _score in self.recall_scored(query, k=k, kind=kind)]
+
+    def recall_scored(self, query: str, k: int = 5, kind: str | None = None,
+                      *, touch: bool = True) -> list[tuple[Lesson, float, float]]:
+        """Like :meth:`recall` but returns ``(lesson, relevance, score)`` triples.
+
+        ``relevance`` is the raw 0..1 similarity (usable as a quality floor);
+        ``score`` folds in weight/tier/trust for ranking. Set ``touch=False`` to
+        score without recording a use (e.g. when assembling/inspecting context)."""
         from .embeddings import cosine
 
         q = _tokens(query)
@@ -155,29 +164,28 @@ class MemoryStore:
             qvec = self.embedder.embed(query)
         except Exception:  # noqa: BLE001
             qvec = []
-        scored: list[tuple[float, Lesson]] = []
+        scored: list[tuple[float, float, Lesson]] = []
         for lesson in self.lessons.values():
             if kind and lesson.kind != kind:
                 continue
             overlap = q & lesson.tokenset()
             sim = cosine(qvec, self._vector(lesson)) if qvec else 0.0
-            # Require *some* signal from either channel to be a candidate.
             if sim <= 0.0 and not overlap:
                 continue
             lexical = len(overlap) / len(q | lesson.tokenset()) if overlap else 0.0
             rel = 0.7 * sim + 0.3 * lexical if qvec else lexical
             tier_boost = 1.5 if lesson.tier == "long_term" else 1.0
             trust_boost = 1.0 if lesson.trusted else 0.6   # curated doctrine ranks first
-            scored.append((rel * lesson.weight * tier_boost * trust_boost, lesson))
+            scored.append((rel * lesson.weight * tier_boost * trust_boost, rel, lesson))
         scored.sort(key=lambda x: x[0], reverse=True)
-        top = [lesson for _, lesson in scored[:k]]
-        now = time.time()
-        for lesson in top:
-            lesson.uses += 1
-            lesson.last_used = now
-        if top:
+        top = scored[:k]
+        if touch and top:
+            now = time.time()
+            for _score, _rel, lesson in top:
+                lesson.uses += 1
+                lesson.last_used = now
             self._flush()
-        return top
+        return [(lesson, rel, score) for score, rel, lesson in top]
 
     def __len__(self) -> int:
         return len(self.lessons)

@@ -152,13 +152,21 @@ class Factory:
         claims: dict[str, bool] = {}
         context = ""
 
-        # Recall relevant lessons from semantic memory and apply them this run.
+        # Discover + assemble the lean, relevant context for this intent (the
+        # broker multi-probes, floors on relevance, dedups, and budgets).
         if self.memory is not None:
-            self._recalled = [lesson.text for lesson in self.memory.recall(intent, k=5)]
+            from ..context_broker import ContextBroker
+
+            bundle = ContextBroker(
+                budget_chars=max(800, self.config.context_char_budget // 2)).assemble(
+                intent, self.memory)
+            self._recalled = bundle.lessons
             result.lessons_applied = len(self._recalled)
             if self._recalled:
                 self.ledger.append(
-                    "memory", "recall", rationale=f"{len(self._recalled)} lessons for: {intent[:60]}",
+                    "memory", "recall",
+                    rationale=f"{len(self._recalled)} lessons ({bundle.dropped} dropped) "
+                              f"for: {intent[:50]}",
                     decision="INFO",
                 )
 

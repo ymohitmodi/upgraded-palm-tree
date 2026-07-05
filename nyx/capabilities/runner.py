@@ -81,6 +81,8 @@ class CapabilityRunner:
         self.constitution = self.cap.constitution(base)
         self.toolbox = build_toolbox(self.config, ledger=self.ledger, provider=self.provider)
         self.toolbox.set_allowed(self.cap.allowed_tools())  # least privilege per capability
+        from ..context_broker import ContextBroker
+        self._broker = ContextBroker(budget_chars=max(800, self.config.context_char_budget // 2))
         self.genomes: dict = {}
 
     @property
@@ -146,8 +148,16 @@ class CapabilityRunner:
                     self.ledger.append("capability", "refresh_knowledge",
                                        rationale=str(stats)[:120], decision="INFO")
 
-            # Recall relevant memory, then act / decide.
-            ctx.lessons = [ln.text for ln in self.memory.recall(item, k=5)]
+            # Discover the internal context this goal needs (multi-probe), kept
+            # lean by the broker (relevance floor + dedup + budget) so the agent
+            # isn't polluted with low-signal snippets.
+            bundle = self._broker.assemble(item, self.memory)
+            ctx.lessons = bundle.lessons
+            if bundle.lessons:
+                self.ledger.append("capability", "context_assembled",
+                                   rationale=f"{len(bundle.lessons)} lessons, "
+                                             f"{bundle.dropped} dropped, {bundle.chars} chars",
+                                   decision="INFO")
             result = self.cap.execute(item, ctx)
             report.cycles.append(result)
 

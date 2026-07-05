@@ -58,7 +58,32 @@ the bounded whole-document synthesis, plus the most relevant sections when a
 query is given. It is an **external** tool, so its output is injection-classified
 and secret-scanned before entering agent context (see [SECURITY](SECURITY.md)).
 
+## Goal-driven context assembly (the broker)
+
+Reading a document is only half of context management; the other half is deciding
+**what internal knowledge a goal needs** and injecting *only* that. The
+[`ContextBroker`](../nyx/context_broker.py) sits in front of every agent run and
+solves the two failure modes:
+
+- **Missing context (discovery).** A single query misses knowledge the goal
+  *implies*. The broker probes the goal **and its sub-phrases** (split on
+  connectives), keeps each memory's best match across probes, and so surfaces the
+  lessons/skills/track-record that actually bear on the goal — e.g. a "billing
+  dashboard **and** retention" goal pulls both the billing and the churn lessons,
+  which one query would miss.
+- **Context pollution (hygiene).** Dumping many tiny, weak, or duplicate snippets
+  makes the model *worse*. The broker applies an **absolute + relative relevance
+  floor** (drop anything far below the top match — scale-invariant, so it works
+  even with weak vectors), **de-duplicates**, **drops trivially short low-signal
+  items**, and **caps the total by a character budget**. Only the high-signal,
+  non-redundant minimum reaches the agent.
+
+The runner and factory both assemble context through the broker before acting,
+and log a `context_assembled` ledger entry (how many kept vs dropped). Net effect:
+NYX *discovers* the context a goal requires and stays **lean** — it never buries
+the model in short, off-topic noise.
+
 The same machinery underlies the factory's inter-stage **working-memory
 compaction** (bounded context between pipeline stages) and the memory store's
-consolidation — one coherent story: bound what the model holds at once, and keep
-everything else recoverable from memory.
+consolidation — one coherent story: discover and inject the useful minimum, bound
+what the model holds at once, and keep everything else recoverable from memory.
