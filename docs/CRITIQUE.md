@@ -61,9 +61,11 @@ become real.
    **native function-calling** (OpenAI-style `tools`/`tool_calls`, typed from
    ArgSpec, allowlist-filtered), **multiple tool calls per turn**, **bounded
    error recovery** (failures are fed back as `[error]` observations with a hint;
-   after repeated failures it answers from what it has), and a sub-goal scratchpad
-   — with the text `CALL` protocol retained as a fallback. Remaining depth: a
-   critic/verify pass on tool outputs and longer-horizon planning.
+   after repeated failures it answers from what it has), a **critic pass on tool
+   outputs** (empty/off-topic/low-signal results are flagged `[low-signal …]` so
+   the agent verifies or re-sources instead of building on junk), and a sub-goal
+   scratchpad — with the text `CALL` protocol retained as a fallback. Remaining
+   depth: longer-horizon planning and an optional LLM-backed critic.
 
 ## Gaps ranked by leverage (what to build next)
 

@@ -45,6 +45,35 @@ def _tool_schemas(toolbox) -> list:
     return schemas
 
 
+_STOP = {"the", "and", "for", "with", "that", "this", "from", "into", "your", "you",
+         "are", "was", "will", "how", "what", "should", "would", "could", "a", "an",
+         "of", "to", "in", "on", "my", "me", "it", "is", "do", "can", "get"}
+
+
+def _terms(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]{3,}", text.lower()) if w not in _STOP}
+
+
+def _assess_observation(task: str, result_text: str) -> tuple[bool, str]:
+    """Critic: is a tool result useful for the task? (heuristic, no extra call).
+
+    Catches the cases a bare ReAct loop would blindly build on — empty results,
+    error text dressed as success, and short off-topic noise — so the agent
+    verifies or re-sources instead."""
+    t = result_text.strip()
+    if not t:
+        return False, "empty result"
+    low = t.lower()
+    if low.startswith(("[tool error]", "[error]", "[crawl error]")) or low in ("none", "null"):
+        return False, "error/empty payload"
+    overlap = _terms(task) & _terms(t)
+    if len(t) < 40 and not overlap:
+        return False, "too short and off-topic"
+    if not overlap and len(t) < 200:
+        return False, "no overlap with the goal"
+    return True, "ok"
+
+
 def _output_guard(text: str, system_content: str) -> tuple[str, list[str]]:
     """Scrub leaked secrets from an agent's OUTPUT and flag prompt-leakage
     (OWASP LLM02 sensitive-info disclosure, LLM07 system-prompt leakage)."""
@@ -253,6 +282,18 @@ class Agent:
                 observation = guardrails.sanitize_outbound(result.text())
                 if not result.ok:
                     observation = f"[error] {result.error}\n(hint: fix the call or try another tool)"
+                else:
+                    # Critic pass: does the result actually support the goal? Flag
+                    # empty/off-topic/low-signal results so the agent verifies or
+                    # re-sources instead of building on junk.
+                    useful, reason = _assess_observation(task, result.text())
+                    if not useful:
+                        observation = (f"[low-signal: {reason} — this may not answer the goal; "
+                                       f"verify or try another source]\n{observation}")
+                        if self.ledger:
+                            self.ledger.append(actor=f"agent:{self.role}",
+                                               action=f"critic:{name}", rationale=reason[:80],
+                                               decision="INFO")
                 messages.append(ChatMessage(role="user",
                                             content=f"# TOOL RESULT ({name})\n{observation}"))
 
