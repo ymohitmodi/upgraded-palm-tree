@@ -186,6 +186,7 @@ one‑shot installer [`scripts/setup-windows11.ps1`](scripts/setup-windows11.ps1
 - [Critique & roadmap](docs/CRITIQUE.md) — an honest look at what's real vs. proxy
 - [Limitations by design](docs/LIMITATIONS.md) — LLM/harness limits and the controls around them
 - [Security model](docs/SECURITY.md) — OWASP LLM Top 10 + Agentic threats (`nyx security-audit`)
+- [Go-live runbook](docs/RUNBOOK.md) — take a capability live (`nyx preflight`)
 - [Tools, MCP & web access](docs/TOOLS.md) — equipping NYX with EDGAR/MCP/scraping
 - [Windows 11 deployment](docs/DEPLOYMENT_WINDOWS11.md)
 
@@ -203,7 +204,8 @@ nyx run "<your objective>" --keep-going --autonomy autonomous
 Allow `sec.gov` / `berkshirehathaway.com` / `stooq.com` in your network policy
 (or run on a mini‑PC with open internet). Without a key it runs in deterministic
 **mock mode** — fully testable, but the deliverable quality comes from the live
-model.
+model. Run **`nyx preflight --probe`** to verify live readiness before going
+autonomous; full steps in the [go‑live runbook](docs/RUNBOOK.md).
 
 ## Status
 

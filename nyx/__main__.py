@@ -289,6 +289,32 @@ def cmd_read(args) -> int:
     return 0
 
 
+def cmd_preflight(args) -> int:
+    """Go-live readiness check for running a capability for real."""
+    from .capabilities import select_for
+    from .readiness import preflight, verdict
+
+    cfg = load_config()
+    print(_banner(cfg) + "\n")
+    cap = args.capability or (select_for(args.objective).name if args.objective else None)
+    checks = preflight(cfg, capability=cap, probe=args.probe)
+    mark = {"PASS": "✓", "WARN": "◐", "FAIL": "✗"}
+    print(f"Preflight for capability: {cap or 'general'}"
+          + (" (with live probe)" if args.probe else "") + "\n")
+    for c in checks:
+        print(f"  {mark.get(c.status, '?')} {c.name:18s} {c.detail}")
+        if c.fix and c.status != "PASS":
+            print(f"      ↳ fix: {c.fix}")
+    v = verdict(checks)
+    print(f"\nReadiness: {v}. " + {
+        "PASS": "Cleared for live autonomous operation.",
+        "WARN": "Runnable, but review the ◐ items (some features degraded).",
+        "FAIL": "Not ready — resolve the ✗ items first.",
+    }[v])
+    print("Runbook: docs/RUNBOOK.md")
+    return 0 if v != "FAIL" else 1
+
+
 def cmd_eval(args) -> int:
     """Run held-out evaluations, record the score, and show the trend over time."""
     from .evaluation import EvalHarness
@@ -572,6 +598,12 @@ def build_parser() -> argparse.ArgumentParser:
     rd.add_argument("source", help="http(s) URL or local file path")
     rd.add_argument("--query", help="optional question to retrieve specific sections")
     rd.set_defaults(func=cmd_read)
+
+    pf = sub.add_parser("preflight", help="go-live readiness check for a capability")
+    pf.add_argument("--capability", help="capability name (software|value-investing|advisor)")
+    pf.add_argument("--objective", help="an objective to route to a capability instead")
+    pf.add_argument("--probe", action="store_true", help="also test live model + data reachability")
+    pf.set_defaults(func=cmd_preflight)
 
     ev = sub.add_parser("eval", help="run held-out evaluations + show score trend over time")
     ev.add_argument("--history", action="store_true", help="show recorded trend, don't run")
