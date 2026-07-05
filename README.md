@@ -87,28 +87,45 @@ into something a single founder can run from a mini‑PC:
 | **Tools & connectivity** | Web crawl, SEC EDGAR/XBRL, MCP servers (`nyx mcp-init`) | [`nyx/tools`](nyx/tools) |
 | **Ollama Cloud brain** | One config, any frontier‑class cloud model | [`nyx/providers/ollama_cloud.py`](nyx/providers/ollama_cloud.py) |
 
+## Install
+
+**One-shot installer** (Linux/macOS — creates a venv, installs everything,
+seeds skills, runs doctor + preflight + tests):
+
+```bash
+./install.sh                 # full: venv + investing extras + dev + tests
+./install.sh --minimal       # core only (mock mode, zero extra deps)
+```
+
+**Or install manually** — the core is dependency-free (mock mode needs nothing):
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e .                       # minimal (mock mode)
+pip install -e ".[investing,dev]"      # or full: live provider + SEC EDGAR + tests
+# equivalently: pip install -r requirements-dev.txt
+cp .env.example .env                    # every value has a safe default
+```
+
+Windows 11 mini-PC: `scripts/setup-windows11.ps1`. Going live (keys + data):
+`nyx preflight --probe` then the [runbook](docs/RUNBOOK.md).
+
 ## Quick start
 
 ```bash
-# 1. Install (editable)
-python -m pip install -e .
+# Hand NYX an OBJECTIVE and let it run autonomously (mock mode works offline):
+#   route -> plan -> act (tools) -> gate (all verified) -> reflect -> evolve -> repeat
+nyx run "Launch a SaaS analytics product" --autonomy autonomous --keep-going
+nyx run "Find deep-value companies; learn from Buffett" --autonomy autonomous
 
-# 2. Configure (copy and edit). Works in MOCK mode with no key at all.
-cp .env.example .env
-
-# 3. Run a full dark-factory build of a feature, end to end
+# One feature through the full gated pipeline:
 nyx build "Add a usage-based billing dashboard with Stripe metering"
 
-# 4. Or hand NYX an OBJECTIVE and let it run autonomously:
-#    plan -> build each feature -> evolve its agents -> adopt the winners -> repeat
-nyx run "Launch a SaaS analytics product" --autonomy autonomous --keep-going
-
-# 5. Watch the constitutional, audited pipeline run
-nyx status
-nyx ledger --tail 20
-
-# 6. Let the agents evolve themselves against a benchmark
-nyx evolve --generations 5
+# Evidence surfaces (the trust artifacts):
+nyx eval             # held-out score trend — did it get better?
+nyx track            # realized-outcome track record
+nyx ledger --tail 20 # tamper-evident audit trail
+nyx security-audit   # OWASP LLM Top 10 + Agentic-threat posture
 ```
 
 ## "If I give it an objective, will it keep going, stay productive, and evolve?"

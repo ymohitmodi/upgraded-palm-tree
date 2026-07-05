@@ -1,0 +1,5 @@
+# NYX — development dependencies (tests, lint, packaging). Includes the runtime.
+-r requirements.txt
+pytest>=8.0
+ruff>=0.5
+build>=1.0
