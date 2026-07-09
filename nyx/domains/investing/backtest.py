@@ -158,8 +158,9 @@ def llm_factor_weights(genome: Genome | None, config, provider) -> dict:
         "Reply with ONLY four numbers in order mos,roic,debt,oey — e.g. `2,1,1,3`."
     )
     try:
+        # Enough headroom for a reasoning model to finish thinking and then answer.
         out = provider.chat(config.model("fast"), [ChatMessage(role="user", content=prompt)],
-                            temperature=0.0, max_tokens=20).text
+                            temperature=0.0, max_tokens=512).text
         nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", out)][:4]
         if len(nums) == 4:
             return {f: min(max(n, 0.0), 3.0) for f, n in zip(_FACTORS, nums)}

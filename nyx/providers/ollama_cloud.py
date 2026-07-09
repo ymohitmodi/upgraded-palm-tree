@@ -22,6 +22,18 @@ class ProviderError(RuntimeError):
     pass
 
 
+# Budget used when a first attempt returned no content because the model was still
+# reasoning when its token budget ran out.
+REASONING_RETRY_TOKENS = 2048
+
+
+def _finish_reason(data: dict) -> str:
+    try:
+        return data["choices"][0].get("finish_reason") or ""
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return ""
+
+
 def _parse_tool_calls(message: dict) -> list:  # pragma: no cover - network shape
     """Normalize OpenAI-style message.tool_calls -> [{name, arguments dict}]."""
     calls = []
@@ -55,6 +67,29 @@ class OllamaCloudProvider:
         temperature: float = 0.2,
         max_tokens: int = 2048,
         tools: list | None = None,
+    ) -> Completion:
+        completion = self._chat_once(model, messages, temperature=temperature,
+                                     max_tokens=max_tokens, tools=tools)
+        # Reasoning models (qwen3.5, glm-5.x, gpt-oss, deepseek-v4…) emit their
+        # chain of thought in a separate `reasoning` field and only fill `content`
+        # once they stop thinking. A budget that runs out mid-reasoning therefore
+        # returns EMPTY content with finish_reason="length" — which would silently
+        # degrade every structured call site (router, injection classifier, factor
+        # weights) to its fallback. Give it room to finish, once.
+        if not completion.text.strip() and max_tokens < REASONING_RETRY_TOKENS:
+            if _finish_reason(completion.raw) == "length":
+                completion = self._chat_once(model, messages, temperature=temperature,
+                                             max_tokens=REASONING_RETRY_TOKENS, tools=tools)
+        return completion
+
+    def _chat_once(
+        self,
+        model: str,
+        messages: list[ChatMessage],
+        *,
+        temperature: float,
+        max_tokens: int,
+        tools: list | None,
     ) -> Completion:
         payload = {
             "model": model,

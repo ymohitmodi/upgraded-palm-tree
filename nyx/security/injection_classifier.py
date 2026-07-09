@@ -46,8 +46,10 @@ def classify_injection(text: str, config=None, provider=None) -> InjectionVerdic
         "Answer with exactly one word: INJECTION or SAFE."
     )
     try:
+        # Budget must clear the model's reasoning phase — a truncated reasoning
+        # step returns empty content, silently reducing this to the heuristic.
         out = provider.chat(config.model("fast"), [ChatMessage(role="user", content=prompt)],
-                            temperature=0.0, max_tokens=5).text.strip().upper()
+                            temperature=0.0, max_tokens=256).text.strip().upper()
         is_inj = out.startswith("INJECT")
         return InjectionVerdict(is_inj, f"model:{out[:20]}", "llm")
     except Exception:  # noqa: BLE001 — never let the classifier crash a run

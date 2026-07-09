@@ -97,8 +97,10 @@ def make_distiller(config=None, provider=None):
             f"Return the UPDATED synthesis (<= {budget} chars)."
         )
         try:
+            # Room for the model to reason *and* emit the synthesis; too tight and
+            # `content` comes back empty, silently reverting to the extractive fold.
             out = provider.chat(config.model("fast"), [ChatMessage(role="user", content=prompt)],
-                                temperature=0.1, max_tokens=1024).text.strip()
+                                temperature=0.1, max_tokens=2048).text.strip()
             return out[:budget] if out else _extractive((running + "\n" + chunk), budget)
         except Exception:  # noqa: BLE001 — fall back rather than crash a long read
             return _extractive((running + "\n" + chunk), budget)

@@ -104,7 +104,9 @@ def assess_company(config, provider, *, ticker: str, factor_score: float,
             [ChatMessage(role="system", content=system),
              ChatMessage(role="user",
                          content=_prompt(ticker, metrics, principles, evidence, held_by))],
-            temperature=0.1, max_tokens=400,
+            # Reasoning models spend hundreds of tokens thinking before `content`
+            # appears; a tight budget yields an empty answer.
+            temperature=0.1, max_tokens=1200,
         )
         if run_metrics is not None:
             run_metrics.record_call(out.prompt_tokens, out.completion_tokens)

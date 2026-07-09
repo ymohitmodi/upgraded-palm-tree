@@ -28,7 +28,9 @@ def route(objective: str, config: Config, provider: Provider) -> Capability:
                 config.model("fast"),
                 [ChatMessage(role="user", content=prompt)],
                 temperature=0.0,
-                max_tokens=20,
+                # Reasoning models think before answering; too tight a budget
+                # returns empty content and silently falls back to keyword routing.
+                max_tokens=256,
             )
             name = completion.text.strip().splitlines()[0].strip("`'\" .").lower()
             chosen = get(name)
