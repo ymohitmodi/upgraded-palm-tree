@@ -15,23 +15,30 @@ import re
 from ...constitution import Constitution
 from ...tools.web import WebFetcher
 from ..investing import buffett
-from ..investing.backtest import INVESTING_DIRECTIVES, ValueBenchmark
-from ..investing.data import try_build_universes
+from ..investing.assess import assess_company, rank_assessments
+from ..investing.backtest import (
+    INVESTING_DIRECTIVES,
+    ValueBenchmark,
+    composite_rank,
+    llm_factor_weights,
+)
+from ..investing.data import today, try_build_current_universe, try_build_universes
+from ..investing.filings import (
+    FOOTNOTE_TOPICS,
+    MCP_EDGAR,
+    bellwether_holdings,
+    ingest_company_filings,
+)
 from ..investing.gates import check_investing, investing_constitution
 from ..investing.news import fetch_news
 from ...capabilities.base import Capability, CycleContext, CycleResult
-
-MCP_EDGAR = "mcp.edgartools"
 
 # A small default watchlist; widened at runtime via the SEC screener (edgar_screen)
 # and overridable with NYX_INVEST_TICKERS / NYX_INVEST_UNIVERSE_SIZE.
 DEFAULT_TICKERS = ["AAPL", "MSFT", "BRK-B", "KO", "JNJ", "PG", "WMT", "XOM",
                    "JPM", "UNH", "HD", "PEP", "CVX", "ABBV", "MRK", "COST"]
 
-# Footnote topics rotated through as the analyst re-reads filings cycle by cycle.
-_FOOTNOTE_TOPICS = ["debt", "leases", "litigation", "income taxes",
-                    "commitments and contingencies", "revenue recognition"]
-# A great investor whose 13F holdings are worth reading as a signal.
+_FOOTNOTE_TOPICS = FOOTNOTE_TOPICS   # rotated per cycle during a run
 _BELLWETHER_13F = "BRK-B"
 
 # Leading \b only: alternatives are stems ("undervalu", "stock") that must match
@@ -53,6 +60,7 @@ class ValueInvestingCapability(Capability):
         self._seeded_letters = False
         self._seeded_13f = False
         self._discovered = False
+        self._digests: dict = {}      # ticker -> DocumentDigest of its full filings
 
     def matches(self, objective: str) -> bool:
         return bool(_MATCH.search(objective))
@@ -197,19 +205,19 @@ class ValueInvestingCapability(Capability):
                     source="edgartools-mcp", weight=1.3, trusted=False)
                 stats["events_8k"] = 1
                 stats["live"] = True
-            # A bellwether investor's 13F holdings (read once) — what great
-            # capital allocators actually own.
+            # A bellwether investor's actual 13F positions (read once). The MCP tool
+            # reports only a holdings *count*, so the real infotable is read direct.
             if not self._seeded_13f:
                 self._seeded_13f = True
-                f13 = ctx.toolbox.call(MCP_EDGAR, tool="edgar_ownership",
-                                       arguments={"identifier": _BELLWETHER_13F,
-                                                  "analysis_type": "fund_portfolio", "limit": 25})
-                if f13.ok:
+                owners = bellwether_holdings(identity=ctx.config.edgar_identity)
+                if owners:
+                    top = sorted(owners, key=lambda t: t)[:40]
                     ctx.memory.remember(
-                        f"13F holdings of {_BELLWETHER_13F}: {f13.text(1400)}",
+                        f"13F holdings of {_BELLWETHER_13F} ({len(owners)} positions): "
+                        f"{', '.join(top)}",
                         kind="research", tags=["sec", "13f", "holdings", "bellwether"],
-                        source="edgartools-mcp", weight=1.6, trusted=False)
-                    stats["holdings_13f"] = 1
+                        source="edgartools-13f", weight=1.6, trusted=False)
+                    stats["holdings_13f"] = len(owners)
                     stats["live"] = True
         else:
             # Fallback: standardized XBRL facts via the built-in tool.
@@ -221,6 +229,106 @@ class ValueInvestingCapability(Capability):
                 stats["footnotes"] = 1
                 stats["live"] = True
         return stats
+
+    def _deep_read_all(self, ctx: CycleContext, tickers: list[str]) -> int:
+        """Read EVERY company's filings end-to-end into memory — nothing truncated.
+
+        The long-document engine chunks each filing, folds every chunk into a bounded
+        synthesis, and embeds all chunks so any detail stays retrievable. Distillation
+        is the free deterministic fold by default; set ``NYX_DEEP_READ_LLM=1`` to
+        distill with the live model (costs ~1 call per chunk per company).
+        Idempotent: a company already read is skipped."""
+        if MCP_EDGAR not in ctx.toolbox.names():
+            return 0
+        use_llm = os.environ.get("NYX_DEEP_READ_LLM", "0") == "1"
+        cfg, provider = (ctx.config, ctx.provider) if use_llm else (None, None)
+        read = 0
+        for ticker in tickers:
+            if ticker in self._digests:
+                continue
+            digest = ingest_company_filings(ctx.memory, ctx.toolbox, ticker,
+                                            config=cfg, provider=provider)
+            if digest is not None:
+                self._digests[ticker] = digest
+                read += 1
+        ctx.ledger.append("value-investing", "deep_read",
+                          rationale=f"read full filings for {read}/{len(tickers)} companies",
+                          decision="INFO")
+        return read
+
+    def _evidence_for(self, ticker: str, ctx: CycleContext) -> str:
+        """Pull the filing passages that actually bear on the decision, by embedding
+        retrieval over the company's deep-read digest (detail without truncation)."""
+        query = ("debt covenants leverage litigation contingencies leases impairment "
+                 "insider selling revenue recognition going concern moat")
+        digest = self._digests.get(ticker)
+        if digest is not None:
+            return "\n---\n".join(digest.retrieve(query, k=3))[:6000]
+        hits = ctx.memory.recall(f"{ticker} SEC filings footnotes", k=2)
+        return "\n---\n".join(h.text for h in hits)[:6000] or "(no filing evidence read)"
+
+    def screen_today(self, ctx: CycleContext, *, top_n: int = 8) -> list:
+        """Predict: apply the EVOLVED doctrine to today's fundamentals.
+
+        Training happens on the historical walk-forward (which needs realized returns
+        to score); prediction happens here, as of today, where no forward return can
+        exist yet. Same factors, same genome — only the as-of date moves. Every
+        company's filings are read in full *before* any of them is judged."""
+        self._discover_universe(ctx)
+        fetcher = WebFetcher(cache_dir=ctx.config.web_cache_dir, user_agent=ctx.config.user_agent,
+                             allowed_domains=ctx.config.allowed_domains,
+                             rate_limit_seconds=ctx.config.web_rate_limit_seconds)
+        as_of = today()
+        universe = try_build_current_universe(self.tickers, as_of=as_of,
+                                              identity=ctx.config.edgar_identity,
+                                              fetcher=fetcher)
+        if universe is None:
+            ctx.ledger.append("value-investing", "screen_today",
+                              rationale="live data unavailable — no current screen",
+                              decision="BLOCK")
+            return []
+
+        genome = ctx.genomes.get("analyst")
+        weights = llm_factor_weights(genome, ctx.config, ctx.provider)
+        ranked = composite_rank(universe, weights)
+
+        # Read every company's filings BEFORE judging any of them.
+        self._deep_read_all(ctx, [c.ticker for _, c in ranked])
+        owners = bellwether_holdings(identity=ctx.config.edgar_identity)
+        principles = "\n".join(
+            f"- {lesson.text}" for lesson in ctx.memory.recall(
+                "Buffett doctrine margin of safety moat owner earnings ROIC leverage", k=8))
+        doctrine = genome.system_prompt if genome else ""
+
+        assessments = []
+        for factor_score, co in ranked:
+            metrics = (f"market cap ${co.price / 1e9:,.1f}B; conservative intrinsic value "
+                       f"${co.intrinsic_value / 1e9:,.1f}B; margin of safety "
+                       f"{co.margin_of_safety:+.1%}; ROIC {co.roic:+.1%}; debt/equity "
+                       f"{co.debt_to_equity:.2f}; owner-earnings yield "
+                       f"{co.owner_earnings_yield:+.1%}")
+            # Respect the call budget: past it, rank on factors alone rather than stop.
+            budget_left = ctx.metrics.calls < ctx.config.max_calls
+            assessments.append(assess_company(
+                ctx.config if budget_left else None,
+                ctx.provider if budget_left else None,
+                ticker=co.ticker, factor_score=factor_score, metrics=metrics,
+                principles=principles, evidence=self._evidence_for(co.ticker, ctx),
+                held_by=owners.get(co.ticker, []), doctrine=doctrine,
+                run_metrics=ctx.metrics))
+
+        final = rank_assessments(assessments)
+        ctx.ledger.append("value-investing", "screen_today",
+                          rationale=f"as_of={as_of}: {len(universe.companies)} assessed; "
+                                    f"top: {', '.join(a.ticker for a in final[:5])}",
+                          decision="PASS")
+        for a in final[:top_n]:
+            ctx.memory.remember(
+                f"CURRENT SCREEN {as_of} — {a.ticker}: conviction {a.llm_score:.1f}/10, "
+                f"factor {a.factor_score:+.2f}, final {a.final_score:.3f}. {a.rationale}",
+                kind="research", tags=["investing", "screen", a.ticker.lower(), "current"],
+                source="screen_today", weight=1.5, trusted=False)
+        return final[:top_n]
 
     def plan(self, objective: str, ctx: CycleContext) -> list[str]:
         return [

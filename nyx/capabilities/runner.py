@@ -103,6 +103,15 @@ class CapabilityRunner:
             return best.score
         return None
 
+    # -- public surface for one-shot commands (e.g. `nyx screen`) -------------
+    def adopt_best(self) -> float | None:
+        """Load the best evolved genome from the archive; returns its score (or None)."""
+        return self._adopt()
+
+    def context(self, cycle_index: int = 0) -> CycleContext:
+        """A ready cycle context (memory, ledger, toolbox, constitution, provider)."""
+        return self._ctx(cycle_index)
+
     def run(
         self,
         objective: str,

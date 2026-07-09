@@ -352,6 +352,29 @@ def build_universes(
     return universes
 
 
+def today() -> str:
+    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def build_current_universe(tickers: list[str], *, as_of: str = "", **kwargs) -> Universe:
+    """Build the universe **as of today** for a forward-looking screen.
+
+    Identical machinery to the backtest universe, with one difference: there is no
+    realized forward return yet (that is the whole point of predicting), so it is
+    fixed at 0.0 and never used for ranking — only the point-in-time value factors
+    are. Raises DataUnavailable if too few clean companies load."""
+    return build_universe(tickers, as_of=as_of or today(),
+                          forward_return_fn=lambda _t: 0.0, **kwargs)
+
+
+def try_build_current_universe(tickers, **kwargs) -> Universe | None:
+    """Best-effort as-of-today universe, or None when live data is unavailable."""
+    try:
+        return build_current_universe(tickers, **kwargs)
+    except DataUnavailable:
+        return None
+
+
 def try_build_universes(tickers, **kwargs) -> list[Universe] | None:
     """Best-effort walk-forward: return real universes or None (use synthetic)."""
     try:

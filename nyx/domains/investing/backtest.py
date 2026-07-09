@@ -168,6 +168,28 @@ def llm_factor_weights(genome: Genome | None, config, provider) -> dict:
     return genome_factor_weights(genome)
 
 
+def composite_rank(universe: Universe, w: dict) -> list[tuple[float, Company]]:
+    """Rank a universe by the analyst's weighted composite of the four value
+    factors (each cross-sectionally z-scored, so scale never matters).
+
+    Shared by the historical backtest scorer and the as-of-today live screen —
+    the *same* doctrine ranks past and present, which is what makes the evolved
+    genome transferable from training to prediction.
+    """
+    cos = universe.companies
+    z_mos = _z([c.margin_of_safety for c in cos])
+    z_roic = _z([c.roic for c in cos])
+    z_debt = _z([c.debt_to_equity for c in cos])
+    z_oey = _z([c.owner_earnings_yield for c in cos])
+    scored = [
+        (w["mos"] * z_mos[i] + w["roic"] * z_roic[i]
+         - w["debt"] * z_debt[i] + w["oey"] * z_oey[i], c)
+        for i, c in enumerate(cos)
+    ]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored
+
+
 @dataclass
 class BacktestResult:
     picks: list[str]
@@ -206,17 +228,7 @@ class ValueBenchmark:
                               downside=avg_down, score=avg_score)
 
     def _evaluate_one(self, universe: Universe, w: dict) -> BacktestResult:
-        cos = universe.companies
-        z_mos = _z([c.margin_of_safety for c in cos])
-        z_roic = _z([c.roic for c in cos])
-        z_debt = _z([c.debt_to_equity for c in cos])
-        z_oey = _z([c.owner_earnings_yield for c in cos])
-        scored = []
-        for i, c in enumerate(cos):
-            composite = (w["mos"] * z_mos[i] + w["roic"] * z_roic[i]
-                         - w["debt"] * z_debt[i] + w["oey"] * z_oey[i])
-            scored.append((composite, c))
-        scored.sort(key=lambda x: x[0], reverse=True)
+        scored = composite_rank(universe, w)
         picks = [c for _, c in scored[: self.top_n]]
 
         port = sum(c.forward_return for c in picks) / len(picks)

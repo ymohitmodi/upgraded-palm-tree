@@ -378,6 +378,39 @@ def cmd_security_audit(args) -> int:
     return 0
 
 
+def cmd_screen(args) -> int:
+    """Apply the EVOLVED analyst to today's fundamentals → a current shortlist.
+
+    Training is the historical walk-forward (`nyx run`), which needs realized returns
+    to score a genome. Prediction is this: same doctrine, same factors, as of today —
+    after reading every candidate's SEC filings in full."""
+    from .capabilities.runner import CapabilityRunner
+    from .domains.investing.capability import ValueInvestingCapability
+
+    cfg = load_config()
+    runner = CapabilityRunner(ValueInvestingCapability(), config=cfg)
+    score = runner.adopt_best()
+    print(f"NYX current screen — analyst genome: "
+          f"{'evolved, backtest score ' + format(score, '.4f') if score is not None else 'seed (unevolved)'}")
+    if cfg.mock_mode:
+        print("MOCK mode (no OLLAMA_API_KEY): ranking on value factors only.")
+    print("Reading filings for every candidate before judging any — this takes a while.\n")
+
+    picks = runner.cap.screen_today(runner.context(0), top_n=args.top)
+    if not picks:
+        print("No live universe could be built. Check EDGAR_IDENTITY, network, and "
+              "NYX_ALLOWED_DOMAINS (needs sec.gov + finance.yahoo.com).")
+        return 1
+    print(f"{'#':<3}{'TICKER':<8}{'FINAL':>7}{'CONVICTION':>12}{'FACTOR':>8}  13F  WHY")
+    for i, a in enumerate(picks, 1):
+        held = "yes" if a.held_by else " - "
+        print(f"{i:<3}{a.ticker:<8}{a.final_score:>7.3f}{a.llm_score:>9.1f}/10"
+              f"{a.factor_score:>8.2f}  {held}  {a.rationale[:66]}")
+    print("\nRanked by blended conviction (filings) + value factors. "
+          "Not investment advice; no returns are guaranteed.")
+    return 0
+
+
 def cmd_mcp_init(args) -> int:
     """Write a starter MCP manifest registering a SEC EDGAR server."""
     from .tools.mcp import write_edgartools_manifest, write_sample_manifest
@@ -628,6 +661,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sa = sub.add_parser("security-audit", help="audit against OWASP LLM + Agentic threats")
     sa.set_defaults(func=cmd_security_audit)
+
+    sc = sub.add_parser("screen", help="apply the evolved analyst to TODAY's fundamentals")
+    sc.add_argument("--top", type=int, default=8, help="how many names to shortlist")
+    sc.set_defaults(func=cmd_screen)
 
     mi = sub.add_parser("mcp-init", help="write a starter MCP manifest (SEC EDGAR)")
     mi.add_argument("--server", choices=["edgartools", "sec-edgar-mcp"], default="edgartools",
