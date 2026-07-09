@@ -43,6 +43,29 @@ def html_to_text(html: str) -> str:
     return _WS_RE.sub("\n\n", text).strip()
 
 
+def pdf_to_text(body: bytes) -> str:
+    """Extract readable text from a PDF's bytes.
+
+    Many primary sources (e.g. Berkshire's shareholder letters) are PDFs. Without
+    this, ``body.decode("utf-8")`` yields binary garbage. Uses ``pypdf`` if
+    installed; otherwise returns a clear, actionable placeholder rather than
+    poisoning memory with undecodable bytes.
+    """
+    try:
+        from io import BytesIO
+
+        from pypdf import PdfReader
+    except ImportError:
+        return "[pdf not extracted — install pypdf: pip install pypdf]"
+    try:
+        reader = PdfReader(BytesIO(body))
+        pages = [(p.extract_text() or "") for p in reader.pages]
+    except Exception as exc:  # noqa: BLE001 — a malformed PDF must not sink a crawl
+        return f"[pdf extraction failed: {exc}]"
+    text = "\n\n".join(pages)
+    return _WS_RE.sub("\n\n", text).strip()
+
+
 def _default_transport(url: str, headers: dict) -> tuple[int, bytes, str]:
     try:
         import requests  # optional
@@ -112,8 +135,13 @@ class WebFetcher:
             time.sleep(wait)
         status, body, final_url = self.transport(url, {"User-Agent": self.user_agent})
 
-        raw = body.decode("utf-8", errors="replace")
-        text = html_to_text(raw) if (as_text and "<" in raw[:2000]) else raw
+        # PDFs (e.g. Berkshire letters) are binary — extract text, don't decode
+        # the raw bytes into garbage.
+        if body[:5] == b"%PDF-":
+            text = pdf_to_text(body) if as_text else body.decode("latin-1", errors="replace")
+        else:
+            raw = body.decode("utf-8", errors="replace")
+            text = html_to_text(raw) if (as_text and "<" in raw[:2000]) else raw
         # Only cache successful responses — a transient 4xx/5xx must not poison
         # the cache and mask the source forever.
         if 200 <= status < 300:

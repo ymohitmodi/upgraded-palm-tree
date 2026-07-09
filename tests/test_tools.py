@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from nyx.memory import MemoryStore
 from nyx.tools import WebFetcher, build_toolbox, html_to_text
-from nyx.tools.mcp import load_manifest, write_sample_manifest
+from nyx.tools.mcp import load_manifest, write_edgartools_manifest, write_sample_manifest
 from nyx.tools.registry import ToolRegistry, ToolResult
 
 
@@ -67,6 +67,19 @@ def test_mcp_manifest_roundtrip(tmp_path):
     assert spec.command == "docker"
     assert "stefanoamorelli/sec-edgar-mcp:latest" in spec.args
     assert "SEC_EDGAR_USER_AGENT=Jane Doe (jane@example.com)" in spec.args
+
+
+def test_edgartools_mcp_manifest_roundtrip(tmp_path):
+    path = tmp_path / "mcp.json"
+    write_edgartools_manifest(path, identity="Jane Doe jane@example.com",
+                              python_exe="/usr/bin/python3")
+    specs = load_manifest(path)
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec.name == "edgartools"
+    assert spec.command == "/usr/bin/python3"          # explicit interpreter honored
+    assert spec.args == ["-m", "edgar.ai"]             # no Docker; pure-Python launch
+    assert spec.env["EDGAR_IDENTITY"] == "Jane Doe jane@example.com"
 
 
 def test_build_toolbox_registers_expected_tools(config):

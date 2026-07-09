@@ -20,7 +20,8 @@ dependencies = []
 http = ["requests>=2.31"]
 yaml = ["PyYAML>=6.0"]
 # Live SEC EDGAR / XBRL access (same engine as the edgartools MCP server).
-investing = ["edgartools[ai]>=2.0", "requests>=2.31"]
+# pypdf extracts text from PDF primary sources (e.g. Berkshire shareholder letters).
+investing = ["edgartools[ai]>=2.0", "requests>=2.31", "pypdf>=4.0"]
 dev = ["pytest>=8.0", "ruff>=0.5", "PyYAML>=6.0"]
 
 [project.scripts]

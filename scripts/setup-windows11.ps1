@@ -39,7 +39,8 @@ Write-Host "Creating virtual environment (.venv)..." -ForegroundColor Yellow
 py -3.11 -m venv .venv
 & .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -e ".[http,yaml]"
+# investing extra bundles edgartools (live SEC/XBRL) + pypdf (read PDF letters).
+python -m pip install -e ".[http,yaml,investing]"
 
 # 4. Configuration -------------------------------------------------------------
 if (-not (Test-Path .env)) {

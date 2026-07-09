@@ -146,7 +146,7 @@ class Factory:
     # -- run -----------------------------------------------------------------
     def build(self, intent: str, approver: Approver | None = None) -> FactoryResult:
         """Run the full pipeline for a feature/product intent."""
-        audit_start_seq = self.ledger._seq   # to prove this run wrote to the ledger
+        audit_start_seq = self.ledger.next_seq()   # to prove this run wrote to the ledger
         self.ledger.append("factory", "run_start", rationale=intent, decision="INFO")
         result = FactoryResult(intent=intent)
         claims: dict[str, bool] = {}
@@ -223,7 +223,7 @@ class Factory:
             if stage == "operate":
                 from .verify import verify_audit
 
-                av = verify_audit(self.ledger, self.ledger._seq - audit_start_seq)
+                av = verify_audit(self.ledger, self.ledger.next_seq() - audit_start_seq)
                 claims["audited"] = bool(claims.get("audited", False)) and av.ok
                 result.findings.extend(av.findings)
                 self.ledger.append("factory", "verify_audit",

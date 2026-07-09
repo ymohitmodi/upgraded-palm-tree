@@ -75,6 +75,45 @@ def test_build_universe_with_injected_fakes():
     assert aaa.forward_return == 0.30
 
 
+def test_screener_widens_universe(monkeypatch):
+    """_discover_universe merges SEC-screener tickers into the watchlist, deduped
+    and capped, when the edgartools MCP server is available."""
+    import json as _json
+    from types import SimpleNamespace
+
+    from nyx.domains.investing.capability import ValueInvestingCapability
+    from nyx.tools.registry import ToolResult
+
+    monkeypatch.setenv("NYX_INVEST_UNIVERSE_SIZE", "6")
+    screened = {"data": {"companies": [
+        {"ticker": "AAPL"},        # already in the watchlist → deduped
+        {"ticker": "LLY"}, {"ticker": "V"}, {"ticker": "MA"}, {"ticker": "COST"},
+    ]}}
+
+    calls = []
+
+    class FakeTools:
+        def names(self):
+            return ["mcp.edgartools", "web_fetch"]
+
+        def call(self, name, **kwargs):
+            calls.append((name, kwargs))
+            return ToolResult(ok=True, data=_json.dumps(screened))
+
+    ledger = SimpleNamespace(append=lambda *a, **k: None)
+    ctx = SimpleNamespace(toolbox=FakeTools(), ledger=ledger)
+
+    cap = ValueInvestingCapability(tickers=["AAPL", "MSFT"])
+    cap._discover_universe(ctx)
+    assert calls and calls[0][1]["tool"] == "edgar_screen"
+    assert cap.tickers[:2] == ["AAPL", "MSFT"]          # curated names kept first
+    assert "LLY" in cap.tickers and cap.tickers.count("AAPL") == 1   # merged + deduped
+    assert len(cap.tickers) <= 6                          # capped by NYX_INVEST_UNIVERSE_SIZE
+    calls_after_first = len(calls)
+    cap._discover_universe(ctx)                           # idempotent: no second screen
+    assert len(calls) == calls_after_first
+
+
 def test_build_universe_raises_when_all_fail():
     def boom(_):
         raise DataUnavailable("no data")

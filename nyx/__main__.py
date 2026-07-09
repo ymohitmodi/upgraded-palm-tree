@@ -379,18 +379,31 @@ def cmd_security_audit(args) -> int:
 
 
 def cmd_mcp_init(args) -> int:
-    """Write a starter MCP manifest registering the SEC EDGAR server."""
-    from .tools.mcp import write_sample_manifest
+    """Write a starter MCP manifest registering a SEC EDGAR server."""
+    from .tools.mcp import write_edgartools_manifest, write_sample_manifest
 
     cfg = load_config()
-    identity = cfg.edgar_identity or "Your Name (your@email.com)"
-    path = write_sample_manifest(cfg.mcp_manifest, identity=identity)
-    print(f"Wrote MCP manifest: {path}")
-    print("Registered: sec-edgar-mcp (https://github.com/stefanoamorelli/sec-edgar-mcp)")
-    print("Runs via Docker: `docker run -i --rm -e SEC_EDGAR_USER_AGENT=... "
-          "stefanoamorelli/sec-edgar-mcp:latest` — filings, XBRL financials, "
-          "Form 3/4/5 insider trading, each with the source SEC URL.")
-    print("Set SEC_EDGAR_USER_AGENT to 'Name (email)'. Edit the file to add more servers.")
+    server = getattr(args, "server", "edgartools")
+    if server == "sec-edgar-mcp":
+        identity = cfg.edgar_identity or "Your Name (your@email.com)"
+        path = write_sample_manifest(cfg.mcp_manifest, identity=identity)
+        print(f"Wrote MCP manifest: {path}")
+        print("Registered: sec-edgar-mcp (https://github.com/stefanoamorelli/sec-edgar-mcp)")
+        print("Runs via Docker: `docker run -i --rm -e SEC_EDGAR_USER_AGENT=... "
+              "stefanoamorelli/sec-edgar-mcp:latest` — filings, XBRL financials, "
+              "Form 3/4/5 insider trading, each with the source SEC URL.")
+        print("Set SEC_EDGAR_USER_AGENT to 'Name (email)'. Edit the file to add more servers.")
+    else:
+        identity = cfg.edgar_identity or "Your Name your@email.com"
+        path = write_edgartools_manifest(cfg.mcp_manifest, identity=identity)
+        print(f"Wrote MCP manifest: {path}")
+        print("Registered: edgartools (https://github.com/sareegpt/edgartools-mcp)")
+        print("Runs via `python -m edgar.ai` — no Docker; reuses the installed "
+              "edgartools[ai]. Exposes XBRL financials, 13F holdings, Form 4 insider "
+              "trades, 8-K events, and standardized facts.")
+        if not cfg.edgar_identity:
+            print("Set EDGAR_IDENTITY='Name email' in .env (SEC requires it).")
+    print("NYX calls it via the 'mcp.<name>' tool. Edit the manifest to add more servers.")
     return 0
 
 
@@ -464,7 +477,7 @@ def cmd_doctor(args) -> int:
     # Ledger
     try:
         ledger = AuditLedger(cfg.ledger_path)
-        print(f"✓ ledger: {ledger._seq} entries, chain intact={ledger.verify()}")
+        print(f"✓ ledger: {len(ledger.read())} entries, chain intact={ledger.verify()}")
     except Exception as exc:  # noqa: BLE001
         print(f"✗ ledger error: {exc}")
         ok = False
@@ -617,6 +630,9 @@ def build_parser() -> argparse.ArgumentParser:
     sa.set_defaults(func=cmd_security_audit)
 
     mi = sub.add_parser("mcp-init", help="write a starter MCP manifest (SEC EDGAR)")
+    mi.add_argument("--server", choices=["edgartools", "sec-edgar-mcp"], default="edgartools",
+                    help="edgartools (python -m edgar.ai, no Docker; default) "
+                         "or sec-edgar-mcp (Docker)")
     mi.set_defaults(func=cmd_mcp_init)
 
     sk = sub.add_parser("skills", help="sync markdown skills into long-term memory")

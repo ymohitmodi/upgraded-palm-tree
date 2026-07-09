@@ -28,8 +28,10 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from .backtest import Company, Universe
 
@@ -75,10 +77,111 @@ def fundamentals_to_company(f: RawFundamentals, forward_return: float) -> Compan
 
 
 # -- fundamentals from EDGAR (optional, point-in-time) ----------------------
-def edgar_fundamentals(ticker: str, *, as_of: str = "",
-                       identity: str = "") -> RawFundamentals:  # pragma: no cover - live only
-    """Derive value factors from edgartools, preferring the latest filing
-    on/before ``as_of`` (limits look-ahead). Needs the lib + network + identity."""
+def _num(v) -> float:
+    """Coerce an edgartools value to a finite float (None/NaN/junk → 0.0)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return f if math.isfinite(f) else 0.0
+
+
+def _financials_as_of(company, as_of: str):  # pragma: no cover - live only
+    """Prefer the most recent 10-K filed on/before ``as_of`` (limits look-ahead);
+    fall back to the company's latest financials."""
+    if as_of:
+        try:
+            filings = company.get_filings(form="10-K")
+            dated = [f for f in filings if str(getattr(f, "filing_date", "")) <= as_of]
+            if dated:
+                fin = dated[0].obj().financials
+                if fin is not None:
+                    return fin
+        except Exception:  # noqa: BLE001 — fall back to current financials
+            pass
+    return company.get_financials()
+
+
+def price_at(series: list[tuple[str, float]], as_of: str) -> float:
+    """Latest close on/before ``as_of`` from a sorted (date, close) series."""
+    price = 0.0
+    for d, c in series:
+        if d <= as_of:
+            price = c
+        else:
+            break
+    return price
+
+
+# -- price history from Yahoo Finance (Stooq is now behind a JS anti-bot wall) --
+def _epoch(date_str: str) -> int:
+    return int(datetime.strptime(date_str, "%Y-%m-%d")
+               .replace(tzinfo=timezone.utc).timestamp())
+
+
+def parse_yahoo_chart(text: str) -> list[tuple[str, float]]:
+    """Parse a Yahoo Finance v8 chart JSON payload into sorted (date, close) pairs.
+
+    Prefers split/dividend-adjusted closes; resilient to nulls and missing keys —
+    a malformed payload yields an empty series, never an exception."""
+    try:
+        result = json.loads(text)["chart"]["result"][0]
+        stamps = result["timestamp"]
+        ind = result["indicators"]
+        closes = None
+        if ind.get("adjclose"):
+            closes = ind["adjclose"][0].get("adjclose")
+        if not closes:
+            closes = ind["quote"][0].get("close")
+    except (KeyError, IndexError, TypeError, ValueError):
+        return []
+    out: list[tuple[str, float]] = []
+    for t, c in zip(stamps, closes or []):
+        if c is None:
+            continue
+        try:
+            price = float(c)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(price) and price > 0:
+            day = datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%d")
+            out.append((day, price))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def yahoo_price_series(fetcher, ticker: str, *, start: str = "2015-01-01",
+                       end: str = "2027-01-01") -> list[tuple[str, float]]:  # pragma: no cover - live
+    """Daily adjusted-close series for a US ticker. One wide-range fetch per
+    ticker (cached by the fetcher) serves both the as-of price and the forward
+    return, so there is a single network round-trip per name."""
+    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker.upper()}"
+           f"?period1={_epoch(start)}&period2={_epoch(end)}&interval=1d")
+    return parse_yahoo_chart(fetcher.fetch(url).text)
+
+
+def market_price_at(fetcher, ticker: str, as_of: str) -> float:  # pragma: no cover - live only
+    """The market price on/before ``as_of`` (for market cap / margin of safety)."""
+    p = price_at(yahoo_price_series(fetcher, ticker), as_of)
+    if p <= 0:
+        raise DataUnavailable(f"no price on/before {as_of} for {ticker}")
+    return p
+
+
+def market_forward_return(fetcher, ticker: str, *, as_of: str,
+                          horizon_days: int = 252) -> float:  # pragma: no cover - live only
+    """Realized ~1y forward return from the Yahoo daily series (same cached fetch
+    as the price), so the analyst's picks are scored on real outcomes."""
+    return forward_return_from_series(yahoo_price_series(fetcher, ticker), as_of=as_of,
+                                      horizon_days=horizon_days, ticker=ticker)
+
+
+def edgar_fundamentals(ticker: str, *, as_of: str = "", identity: str = "",
+                       fetcher=None) -> RawFundamentals:  # pragma: no cover - live only
+    """Derive value factors from edgartools (real accessors), preferring the 10-K
+    filed on/before ``as_of``. Market cap comes from the market price (Stooq) ×
+    diluted shares, since EDGAR carries no price. Needs the lib + network + a
+    valid ``EDGAR_IDENTITY`` and a ``fetcher`` for the price."""
     try:
         import edgar  # type: ignore
     except ImportError as exc:
@@ -88,52 +191,48 @@ def edgar_fundamentals(ticker: str, *, as_of: str = "",
     ident = identity or os.environ.get("EDGAR_IDENTITY", "")
     if not ident:
         raise DataUnavailable("EDGAR_IDENTITY not set")
+    if fetcher is None:
+        raise DataUnavailable("no price source (fetcher) provided")
     try:
         edgar.set_identity(ident)
         company = edgar.Company(ticker)
+        fin = _financials_as_of(company, as_of)
 
-        fin = None
-        if as_of:
-            # Prefer the most recent 10-K filed on/before the backtest date.
-            try:
-                filings = company.get_filings(form="10-K")
-                dated = [f for f in filings if str(getattr(f, "filing_date", "")) <= as_of]
-                if dated:
-                    fin = dated[0].obj().financials
-            except Exception:  # noqa: BLE001 — fall back to current financials
-                fin = None
-        if fin is None:
-            fin = company.get_financials()
+        net_income = _num(fin.get_net_income())
+        total_assets = _num(fin.get_total_assets())
+        total_liabilities = _num(fin.get_total_liabilities())
+        equity = _num(fin.get_stockholders_equity()) or (total_assets - total_liabilities)
+        current_liabilities = _num(fin.get_current_liabilities())
+        op_cf = _num(fin.get_operating_cash_flow())
+        capex = abs(_num(fin.get_capital_expenditures()))
+        fcf = _num(fin.get_free_cash_flow())
+        shares = (_num(fin.get_shares_outstanding_diluted())
+                  or _num(fin.get_shares_outstanding_basic()))
+        if shares <= 0:
+            raise DataUnavailable(f"no diluted share count for {ticker}")
 
-        bs, is_, cf = fin.balance_sheet(), fin.income_statement(), fin.cash_flow_statement()
+        # Owner-earnings (distributable cash): prefer reported FCF, then
+        # operating cash flow minus capex, then net income as a conservative floor.
+        if fcf:
+            owner_earnings = fcf
+        elif op_cf:
+            owner_earnings = op_cf - capex
+        else:
+            owner_earnings = net_income
 
-        def g(stmt, *keys):  # tolerant lookup across label variants
-            for k in keys:
-                try:
-                    val = stmt.loc[k].iloc[0]
-                    if val is not None:
-                        return float(val)
-                except Exception:  # noqa: BLE001
-                    continue
-            return 0.0
-
-        net_income = g(is_, "NetIncome", "Net Income")
-        total_debt = g(bs, "TotalDebt", "Long Term Debt", "LongTermDebt")
-        equity = g(bs, "StockholdersEquity", "Total Equity") or 1.0
-        assets = g(bs, "TotalAssets", "Total Assets") or 1.0
-        op_cf = g(cf, "OperatingCashFlow", "Net Cash Provided by Operating Activities")
-        capex = abs(g(cf, "CapitalExpenditure", "Purchases of Property and Equipment"))
-        mcap = float(getattr(company, "market_cap", 0.0) or 0.0)
-
-        owner_earnings = op_cf - capex
-        invested_capital = (equity + total_debt) or 1.0
+        market_cap = market_price_at(fetcher, ticker, as_of or "9999-12-31") * shares
+        equity = equity or 1.0
+        # Leverage proxy: long-term liabilities (total minus current) to equity —
+        # excludes operating payables so it reads closer to true debt.
+        debt = max(total_liabilities - current_liabilities, 0.0) or total_liabilities
+        invested_capital = (equity + debt) or 1.0
         return RawFundamentals(
             ticker=ticker.upper(),
-            price=mcap or assets,                              # placeholder if no live price
-            intrinsic_value=max(owner_earnings, 0.0) * 12.0,   # crude 12x owner-earnings
+            price=market_cap,
+            intrinsic_value=max(owner_earnings, 0.0) * 12.0,   # conservative 12x owner-earnings
             roic=net_income / invested_capital,
-            debt_to_equity=total_debt / equity,
-            owner_earnings_yield=(owner_earnings / mcap) if mcap else 0.0,
+            debt_to_equity=debt / equity,
+            owner_earnings_yield=(owner_earnings / market_cap) if market_cap else 0.0,
         )
     except DataUnavailable:
         raise
@@ -206,10 +305,10 @@ def build_universe(
     """Build one point-in-time Universe. Injectable fns make the logic testable;
     live defaults use EDGAR + Stooq. Raises DataUnavailable if too few clean
     companies load (so a thin/garbled feed never yields a bogus universe)."""
-    fundamentals_fn = fundamentals_fn or (lambda t: edgar_fundamentals(t, as_of=as_of,
-                                                                        identity=identity))
+    fundamentals_fn = fundamentals_fn or (
+        lambda t: edgar_fundamentals(t, as_of=as_of, identity=identity, fetcher=fetcher))
     forward_return_fn = forward_return_fn or (
-        lambda t: stooq_forward_return(fetcher, t, as_of=as_of))
+        lambda t: market_forward_return(fetcher, t, as_of=as_of))
 
     seen: set[str] = set()
     companies: list[Company] = []
