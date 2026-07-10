@@ -72,8 +72,17 @@ class CapabilityRunner:
         if memory is not None:
             self.memory = memory
         else:
+            from pathlib import Path
+
             from ..embeddings import embedder_for
-            self.memory = MemoryStore(self.config.memory_path,
+            memory_path = self.config.memory_path
+            if self.config.memory_per_capability:
+                # Compartment per capability: the investor's filings research and
+                # the advisor's dossier lessons live in separate stores, so recall
+                # never surfaces another domain's noise and each file stays small.
+                p = Path(memory_path)
+                memory_path = str(p.with_name(f"{p.stem}-{self.cap.name}{p.suffix}"))
+            self.memory = MemoryStore(memory_path,
                                       embedder=embedder_for(self.config, self.provider))
         self.archive = archive if archive is not None else Archive(self.config.evolution_archive)
         self.metrics = Metrics()
@@ -122,7 +131,14 @@ class CapabilityRunner:
         refresh_every: int = 1,
         consolidate_every: int | None = None,
         keep_going: bool = False,
+        hours: float | None = None,
     ) -> RunReport:
+        """Drive the capability. ``hours`` adds a wall-clock budget for lights-out
+        missions (with ``keep_going`` + unlimited cycles it runs for days,
+        compounding memory and evolution until time or the call budget ends)."""
+        import time as _time
+
+        deadline = (_time.monotonic() + hours * 3600) if hours else None
         consolidate_every = (consolidate_every if consolidate_every is not None
                              else self.config.consolidate_every)
         report = RunReport(objective=objective, capability=self.cap.name)
@@ -140,6 +156,10 @@ class CapabilityRunner:
         idx = 0
         while backlog:
             if max_cycles is not None and idx >= max_cycles:
+                break
+            if deadline is not None and _time.monotonic() >= deadline:
+                self.ledger.append("capability", "time_budget_reached",
+                                   rationale=f"{hours}h wall clock", decision="INFO")
                 break
             if self.budget_left <= 0:
                 report.budget_exhausted = True

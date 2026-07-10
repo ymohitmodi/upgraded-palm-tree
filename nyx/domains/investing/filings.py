@@ -18,6 +18,7 @@ So the whole document is read and indexed, while context stays bounded.
 """
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 
@@ -29,6 +30,45 @@ FOOTNOTE_TOPICS = ["debt", "leases", "litigation", "income taxes",
 
 # Great capital allocators whose 13F holdings are worth cross-referencing.
 DEFAULT_13F_MANAGERS = ("BRK-B",)
+
+
+def readable(payload: str, limit: int = 1400) -> str:
+    """Flatten a JSON tool payload into compact ``key: value`` lines.
+
+    MCP tools return ``{"success": true, "data": {...}}`` — storing that raw fills
+    memory with brace scaffolding that embeds poorly and reads worse. This renders
+    the ``data`` subtree as one readable line per scalar (lists inlined, empties
+    dropped), so a remembered lesson is prose-like evidence, not wire format.
+    Non-JSON input passes through untouched.
+    """
+    try:
+        obj = json.loads(payload)
+    except (ValueError, TypeError):
+        return payload[:limit]
+    if isinstance(obj, dict):
+        obj = obj.get("data", obj)
+    lines: list[str] = []
+
+    def walk(prefix: str, value, depth: int) -> None:
+        if len(lines) >= 60 or depth > 4:
+            return
+        if isinstance(value, dict):
+            for k, v in value.items():
+                walk(f"{prefix}{k}." if prefix else f"{k}.", v, depth + 1) \
+                    if isinstance(v, (dict, list)) else walk(f"{prefix}{k}", v, depth + 1)
+        elif isinstance(value, list):
+            scalars = [str(v) for v in value if not isinstance(v, (dict, list))][:12]
+            if scalars:
+                lines.append(f"{prefix.rstrip('.')}: {', '.join(scalars)}")
+            for item in value[:8]:
+                if isinstance(item, (dict, list)):
+                    walk(prefix, item, depth + 1)
+        else:
+            if value not in (None, "", [], {}):
+                lines.append(f"{prefix.rstrip('.')}: {value}")
+
+    walk("", obj, 0)
+    return ("\n".join(lines) or payload)[:limit]
 
 
 @dataclass
@@ -53,8 +93,11 @@ def fetch_company_filings(toolbox, ticker: str) -> FilingRead:  # pragma: no cov
 
     def _add(name: str, result) -> None:
         if result is not None and result.ok and isinstance(result.data, str) and result.data.strip():
-            parts.append(f"## {name}\n{result.data}")
-            read.sections[name] = len(result.data)
+            # Flatten JSON wire format into prose-like lines: the long-document
+            # reader chunks/embeds this, and readable text retrieves far better.
+            body = readable(result.data, limit=len(result.data))
+            parts.append(f"## {name}\n{body}")
+            read.sections[name] = len(body)
 
     for topic in FOOTNOTE_TOPICS:
         _add(f"Footnotes — {topic}",
@@ -68,6 +111,67 @@ def fetch_company_filings(toolbox, ticker: str) -> FilingRead:  # pragma: no cov
                       arguments={"identifier": ticker, "analysis_type": "insiders", "limit": 20}))
     read.text = "\n\n".join(parts)
     return read
+
+
+def read_full_10k(ticker: str, *, identity: str = "") -> str:  # pragma: no cover - live only
+    """The full narrative text of a company's latest 10-K — Business, Risk Factors,
+    MD&A, and notes — straight from edgartools (hundreds of KB, not a summary).
+
+    This is the raw document NYX's long-document reader is built for: too large for
+    any context window, so it is chunked, folded, and embedded rather than truncated.
+    """
+    try:
+        import edgar  # type: ignore
+    except ImportError:
+        return ""
+    ident = identity or os.environ.get("EDGAR_IDENTITY", "")
+    if not ident:
+        return ""
+    try:
+        edgar.set_identity(ident)
+        tenk = edgar.Company(ticker).latest_tenk
+        if tenk is None:
+            return ""
+        parts: list[str] = []
+        # Every item of the report (Item 1 Business … Item 15 Exhibits), so the
+        # WHOLE 10-K is read — the long-document engine bounds it by chunking, so
+        # length is not a limit. Fall back to the main narrative accessors if the
+        # item index is unavailable.
+        items = list(getattr(tenk, "items", []) or [])
+        for item in items:
+            try:
+                text = str(tenk[item] or "").strip()
+            except Exception:  # noqa: BLE001 — a missing item must not sink the read
+                text = ""
+            if len(text) > 40:
+                parts.append(f"{item}\n{text}")
+        if not parts:
+            for section in ("business", "risk_factors", "management_discussion"):
+                try:
+                    text = str(getattr(tenk, section) or "").strip()
+                except Exception:  # noqa: BLE001
+                    text = ""
+                if len(text) > 40:
+                    parts.append(text)
+        return "\n\n".join(parts)
+    except Exception:  # noqa: BLE001 — no 10-K / parse failure → empty, never fatal
+        return ""
+
+
+def ingest_full_10k(memory, ticker: str, *, identity: str = "",
+                    config=None, provider=None):  # pragma: no cover - live only
+    """Read a company's ENTIRE latest 10-K into memory via the long-document engine
+    (chunk → fold → embed) so nothing is truncated. Returns the digest or None."""
+    from ...context import digest_to_memory
+
+    text = read_full_10k(ticker, identity=identity)
+    if len(text) < 500:
+        return None
+    return digest_to_memory(
+        memory, text, source=f"10-K:{ticker}",
+        tags=["sec", ticker.lower(), "10-k", "full-read", "footnotes"],
+        config=config, provider=provider,
+    )
 
 
 def ingest_company_filings(memory, toolbox, ticker: str, *,

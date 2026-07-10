@@ -57,6 +57,9 @@ class Config:
 
     # Memory (semantic lessons)
     memory_path: str = ".nyx/memory.jsonl"
+    # Compartmentalize memory per capability (memory-<capability>.jsonl), so the
+    # investor's filings research never mingles with software or advisor lessons.
+    memory_per_capability: bool = False
     # Standing evaluation score history (held-out suites over time)
     eval_history: str = ".nyx/evals.jsonl"
     # Working-memory compaction: max chars of context carried between stages.
@@ -120,6 +123,8 @@ def load_config(dotenv: bool = True) -> Config:
         ledger_path=os.environ.get("NYX_LEDGER", ".nyx/audit.ledger.jsonl"),
         log_level=os.environ.get("NYX_LOG_LEVEL", "INFO").upper(),
         memory_path=os.environ.get("NYX_MEMORY", ".nyx/memory.jsonl"),
+        memory_per_capability=os.environ.get("NYX_MEMORY_PER_CAPABILITY", "0").strip()
+        in ("1", "true", "yes"),
         eval_history=os.environ.get("NYX_EVAL_HISTORY", ".nyx/evals.jsonl"),
         context_char_budget=int(os.environ.get("NYX_CONTEXT_BUDGET", "4000")),
         consolidate_every=int(os.environ.get("NYX_CONSOLIDATE_EVERY", "5")),

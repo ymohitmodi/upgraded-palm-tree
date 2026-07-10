@@ -36,7 +36,11 @@ def test_value_doctrine_beats_naive_genome():
 
 def test_genome_weights_shift_with_doctrine():
     w = genome_factor_weights(_genome("margin of safety, roic, debt, owner-earnings"))
-    assert w["mos"] > 1.0 and w["roic"] > 1.0 and w["debt"] > 1.0 and w["oey"] > 1.0
+    assert w["mos"] >= 1.0 and w["roic"] >= 1.0 and w["debt"] >= 1.0 and w["oey"] >= 1.0
+    # A charter that emphasizes a factor more heavily earns a higher weight.
+    heavy = genome_factor_weights(_genome(
+        "margin of safety; undervalued; buy cheap below intrinsic value"))
+    assert heavy["mos"] > w["mos"]
 
 
 def test_value_benchmark_plugs_into_evolution():

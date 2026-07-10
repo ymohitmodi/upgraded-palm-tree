@@ -110,8 +110,25 @@ class WebFetcher:
         self._lock = threading.Lock()
 
     def _cache_path(self, url: str) -> Path:
+        """Cache entries partitioned by host (webcache/<host>/<hash>.json), so the
+        store is manageable: inspect, size, or clear one source without touching
+        the rest (SEC frames vs prices vs news vs filings)."""
         h = hashlib.sha256(url.encode()).hexdigest()[:20]
-        return self.cache / f"{h}.json"
+        host = (urlparse(url).hostname or "unknown").lower()
+        host = re.sub(r"[^a-z0-9.-]", "_", host) or "unknown"
+        return self.cache / host / f"{h}.json"
+
+    def _cache_read(self, url: str) -> dict | None:
+        """Read a cached entry — partitioned path first, then the legacy flat
+        layout (pre-partition caches stay warm; no mass re-fetch)."""
+        h = hashlib.sha256(url.encode()).hexdigest()[:20]
+        for path in (self._cache_path(url), self.cache / f"{h}.json"):
+            if path.exists():
+                try:
+                    return json.loads(path.read_text(encoding="utf-8"))
+                except ValueError:
+                    continue
+        return None
 
     def fetch(self, url: str, *, refresh: bool = False, as_text: bool = True) -> Document:
         # SSRF/egress policy: scheme + allowlist + no private/loopback/metadata
@@ -120,10 +137,11 @@ class WebFetcher:
 
         check_url(url, self.allowed, resolve=self._resolve_guard)
 
-        cpath = self._cache_path(url)
-        if cpath.exists() and not refresh:
-            d = json.loads(cpath.read_text(encoding="utf-8"))
-            return Document(url=d["url"], status=d["status"], text=d["text"], from_cache=True)
+        if not refresh:
+            d = self._cache_read(url)
+            if d is not None:
+                return Document(url=d["url"], status=d["status"], text=d["text"],
+                                from_cache=True)
 
         # Per-host rate limit (polite; lock-protected for concurrent crawls —
         # the slot is claimed inside the lock so parallel workers queue up).
@@ -145,6 +163,8 @@ class WebFetcher:
         # Only cache successful responses — a transient 4xx/5xx must not poison
         # the cache and mask the source forever.
         if 200 <= status < 300:
+            cpath = self._cache_path(url)
+            cpath.parent.mkdir(parents=True, exist_ok=True)
             cpath.write_text(
                 json.dumps({"url": final_url, "status": status, "text": text}), encoding="utf-8"
             )

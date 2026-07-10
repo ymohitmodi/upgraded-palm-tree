@@ -39,10 +39,17 @@ def test_capability_eval_returns_scores(tmp_path):
     assert inv is not None and isinstance(inv.score, float)
 
 
-def test_advisor_is_not_objectively_scored(tmp_path):
+def test_advisor_is_scored_on_heldout_rubric(tmp_path):
+    """The advisor now evolves against a deliverable rubric, so `nyx eval` scores
+    it on a held-out suite like every other capability (0..1, deterministic in
+    mock mode)."""
     from nyx.capabilities.registry import get
+    from nyx.providers.mock import MockProvider
 
-    assert get("advisor").eval(_cfg(tmp_path), None) is None
+    cfg = _cfg(tmp_path)
+    res = get("advisor").eval(cfg, MockProvider(cfg))
+    assert res is not None and 0.0 <= res.score <= 1.0
+    assert "held-out advisory rubric" in res.detail
 
 
 def test_harness_records_history_and_delta(tmp_path):

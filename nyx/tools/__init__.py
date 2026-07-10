@@ -76,6 +76,9 @@ def build_toolbox(config: Config, ledger: AuditLedger | None = None, provider=No
         external=True,
     )
 
+    from .research import register_research_tools
+
+    register_research_tools(registry, fetcher)
     register_edgar_tools(registry, identity=config.edgar_identity)
     register_mcp_servers(registry, config.mcp_manifest)
     return registry

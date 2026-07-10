@@ -28,6 +28,8 @@ from ..investing.filings import (
     MCP_EDGAR,
     bellwether_holdings,
     ingest_company_filings,
+    ingest_full_10k,
+    readable,
 )
 from ..investing.gates import check_investing, investing_constitution
 from ..investing.news import fetch_news
@@ -40,6 +42,10 @@ DEFAULT_TICKERS = ["AAPL", "MSFT", "BRK-B", "KO", "JNJ", "PG", "WMT", "XOM",
 
 _FOOTNOTE_TOPICS = FOOTNOTE_TOPICS   # rotated per cycle during a run
 _BELLWETHER_13F = "BRK-B"
+
+# A dedicated run cycle that triggers the whole-market funnel (screen → value →
+# deep-read finalists → judge), so a single `nyx run` evolves AND screens live.
+SCREEN_TASK = "Screen the whole market today; deep-read finalists' 10-Ks; rank by conviction"
 
 # Leading \b only: alternatives are stems ("undervalu", "stock") that must match
 # inflected forms ("undervalued", "stocks") — a trailing \b would reject those.
@@ -179,7 +185,7 @@ class ValueInvestingCapability(Capability):
                                   arguments={"identifier": ticker, "topic": topic})
             if fn.ok:
                 ctx.memory.remember(
-                    f"10-K footnotes ({topic}) for {ticker}: {fn.text(1400)}",
+                    f"10-K footnotes ({topic}) for {ticker}: {readable(fn.data, 1400)}",
                     kind="research", tags=["sec", ticker.lower(), "footnotes", "10-k"],
                     source="edgartools-mcp", weight=1.6, trusted=False)
                 stats["footnotes"] = 1
@@ -190,7 +196,7 @@ class ValueInvestingCapability(Capability):
                                               "analysis_type": "insiders", "limit": 10})
             if ins.ok:
                 ctx.memory.remember(
-                    f"Insider (Form 4) activity for {ticker}: {ins.text(900)}",
+                    f"Insider (Form 4) activity for {ticker}: {readable(ins.data, 900)}",
                     kind="research", tags=["sec", ticker.lower(), "insider", "form-4"],
                     source="edgartools-mcp", weight=1.4, trusted=False)
                 stats["insider"] = 1
@@ -200,7 +206,7 @@ class ValueInvestingCapability(Capability):
                                   arguments={"identifier": ticker, "form": "8-K"})
             if ev.ok:
                 ctx.memory.remember(
-                    f"Recent 8-K events for {ticker}: {ev.text(900)}",
+                    f"Recent 8-K events for {ticker}: {readable(ev.data, 900)}",
                     kind="research", tags=["sec", ticker.lower(), "8-k", "events"],
                     source="edgartools-mcp", weight=1.3, trusted=False)
                 stats["events_8k"] = 1
@@ -231,30 +237,57 @@ class ValueInvestingCapability(Capability):
         return stats
 
     def _deep_read_all(self, ctx: CycleContext, tickers: list[str]) -> int:
-        """Read EVERY company's filings end-to-end into memory — nothing truncated.
+        """Read each finalist's filings end-to-end into memory — nothing truncated.
 
-        The long-document engine chunks each filing, folds every chunk into a bounded
-        synthesis, and embeds all chunks so any detail stays retrievable. Distillation
-        is the free deterministic fold by default; set ``NYX_DEEP_READ_LLM=1`` to
-        distill with the live model (costs ~1 call per chunk per company).
-        Idempotent: a company already read is skipped."""
-        if MCP_EDGAR not in ctx.toolbox.names():
-            return 0
+        For every ticker: the FULL raw 10-K (Business + Risk Factors + MD&A + notes,
+        hundreds of KB) is run through NYX's long-document engine — chunked, folded
+        into a bounded synthesis, and embedded so any passage stays retrievable —
+        plus structured footnotes/8-K/Form 4 via the MCP server. Distillation is the
+        free deterministic fold by default; ``NYX_DEEP_READ_LLM=1`` uses the model
+        (~1 call/chunk). Idempotent: a company already read is skipped."""
         use_llm = os.environ.get("NYX_DEEP_READ_LLM", "0") == "1"
         cfg, provider = (ctx.config, ctx.provider) if use_llm else (None, None)
+        have_mcp = MCP_EDGAR in ctx.toolbox.names()
         read = 0
         for ticker in tickers:
             if ticker in self._digests:
                 continue
-            digest = ingest_company_filings(ctx.memory, ctx.toolbox, ticker,
-                                            config=cfg, provider=provider)
+            # The entire 10-K, read whole via the long-document reader.
+            digest = ingest_full_10k(ctx.memory, ticker, identity=ctx.config.edgar_identity,
+                                     config=cfg, provider=provider)
+            # Structured footnotes / 8-K / insider on top (recent, machine-parsed).
+            if have_mcp:
+                mcp_digest = ingest_company_filings(ctx.memory, ctx.toolbox, ticker,
+                                                    config=cfg, provider=provider)
+                digest = digest or mcp_digest
             if digest is not None:
                 self._digests[ticker] = digest
                 read += 1
         ctx.ledger.append("value-investing", "deep_read",
-                          rationale=f"read full filings for {read}/{len(tickers)} companies",
+                          rationale=f"read full 10-K + filings for {read}/{len(tickers)} finalists",
                           decision="INFO")
         return read
+
+    def _market_candidates(self, ctx: CycleContext, fetcher) -> list[str]:
+        """Funnel stage 1: quality-screen the WHOLE market (price-free, ~7 bulk SEC
+        calls) down to the strongest candidates. Falls back to the screener/watchlist
+        if the bulk endpoints are unreachable."""
+        from ..investing.market import market_universe_tickers
+        try:
+            wide = max(20, int(os.environ.get("NYX_SCREEN_WIDE", "120")))
+        except ValueError:
+            wide = 120
+        try:
+            tickers = market_universe_tickers(fetcher, top_n=wide)
+        except Exception:  # noqa: BLE001 — degrade to the narrow screener
+            tickers = []
+        if tickers:
+            ctx.ledger.append("value-investing", "market_screen",
+                              rationale=f"quality-screened whole market → {len(tickers)} candidates",
+                              decision="INFO")
+            return tickers
+        self._discover_universe(ctx)
+        return self.tickers
 
     def _evidence_for(self, ticker: str, ctx: CycleContext) -> str:
         """Pull the filing passages that actually bear on the decision, by embedding
@@ -268,50 +301,69 @@ class ValueInvestingCapability(Capability):
         return "\n---\n".join(h.text for h in hits)[:6000] or "(no filing evidence read)"
 
     def screen_today(self, ctx: CycleContext, *, top_n: int = 8) -> list:
-        """Predict: apply the EVOLVED doctrine to today's fundamentals.
+        """Predict: apply the EVOLVED doctrine to today's fundamentals, as a funnel.
 
         Training happens on the historical walk-forward (which needs realized returns
         to score); prediction happens here, as of today, where no forward return can
-        exist yet. Same factors, same genome — only the as-of date moves. Every
-        company's filings are read in full *before* any of them is judged."""
-        self._discover_universe(ctx)
-        fetcher = WebFetcher(cache_dir=ctx.config.web_cache_dir, user_agent=ctx.config.user_agent,
+        exist yet. Same factors, same genome — only the as-of date moves.
+
+        Funnel: (1) quality-screen the WHOLE market price-free (~7 bulk SEC calls);
+        (2) fetch real prices for the survivors and rank by the evolved composite
+        (now including margin of safety); (3) read each finalist's ENTIRE 10-K plus
+        footnotes/8-K/insider into memory; (4) have the analyst judge each finalist
+        against the filings, Buffett doctrine, and 13F ownership.
+        """
+        if ctx.config.mock_mode or not ctx.config.edgar_identity:
+            ctx.ledger.append("value-investing", "screen_today",
+                              rationale="needs a live brain + EDGAR_IDENTITY — skipped",
+                              decision="INFO")
+            return []
+        fetcher = WebFetcher(cache_dir=ctx.config.web_cache_dir,
+                             user_agent=ctx.config.edgar_identity or ctx.config.user_agent,
                              allowed_domains=ctx.config.allowed_domains,
                              rate_limit_seconds=ctx.config.web_rate_limit_seconds)
         as_of = today()
-        universe = try_build_current_universe(self.tickers, as_of=as_of,
-                                              identity=ctx.config.edgar_identity,
-                                              fetcher=fetcher)
+
+        # Stage 1 — whole-market quality screen (price-free).
+        candidates = self._market_candidates(ctx, fetcher)
+
+        # Stage 2 — value the survivors with real prices, rank by the evolved genome.
+        universe = try_build_current_universe(candidates, as_of=as_of,
+                                              identity=ctx.config.edgar_identity, fetcher=fetcher)
         if universe is None:
             ctx.ledger.append("value-investing", "screen_today",
                               rationale="live data unavailable — no current screen",
                               decision="BLOCK")
             return []
-
         genome = ctx.genomes.get("analyst")
-        weights = llm_factor_weights(genome, ctx.config, ctx.provider)
+        weights = llm_factor_weights(genome, ctx.config, ctx.provider, metrics=ctx.metrics)
         ranked = composite_rank(universe, weights)
 
-        # Read every company's filings BEFORE judging any of them.
-        self._deep_read_all(ctx, [c.ticker for _, c in ranked])
+        # Stage 3 — deep-read only the finalists (full 10-K + filings), then judge them.
+        try:
+            deep_n = max(1, int(os.environ.get("NYX_SCREEN_DEEP", "15")))
+        except ValueError:
+            deep_n = 15
+        finalists = ranked[:deep_n]
+        self._deep_read_all(ctx, [c.ticker for _, c in finalists])
         owners = bellwether_holdings(identity=ctx.config.edgar_identity)
         principles = "\n".join(
             f"- {lesson.text}" for lesson in ctx.memory.recall(
                 "Buffett doctrine margin of safety moat owner earnings ROIC leverage", k=8))
         doctrine = genome.system_prompt if genome else ""
 
+        # Stage 4 — judgment. Only the deep-read finalists get the (paid) LLM read;
+        # the rest keep their factor rank (offline assessment is neutral).
         assessments = []
-        for factor_score, co in ranked:
+        for rank_i, (factor_score, co) in enumerate(ranked):
             metrics = (f"market cap ${co.price / 1e9:,.1f}B; conservative intrinsic value "
                        f"${co.intrinsic_value / 1e9:,.1f}B; margin of safety "
                        f"{co.margin_of_safety:+.1%}; ROIC {co.roic:+.1%}; debt/equity "
                        f"{co.debt_to_equity:.2f}; owner-earnings yield "
                        f"{co.owner_earnings_yield:+.1%}")
-            # Respect the call budget: past it, rank on factors alone rather than stop.
-            budget_left = ctx.metrics.calls < ctx.config.max_calls
+            judged = rank_i < deep_n and ctx.metrics.calls < ctx.config.max_calls
             assessments.append(assess_company(
-                ctx.config if budget_left else None,
-                ctx.provider if budget_left else None,
+                ctx.config if judged else None, ctx.provider if judged else None,
                 ticker=co.ticker, factor_score=factor_score, metrics=metrics,
                 principles=principles, evidence=self._evidence_for(co.ticker, ctx),
                 held_by=owners.get(co.ticker, []), doctrine=doctrine,
@@ -319,7 +371,8 @@ class ValueInvestingCapability(Capability):
 
         final = rank_assessments(assessments)
         ctx.ledger.append("value-investing", "screen_today",
-                          rationale=f"as_of={as_of}: {len(universe.companies)} assessed; "
+                          rationale=f"as_of={as_of}: {len(candidates)} screened → "
+                                    f"{len(universe.companies)} valued → {len(finalists)} deep-read; "
                                     f"top: {', '.join(a.ticker for a in final[:5])}",
                           decision="PASS")
         for a in final[:top_n]:
@@ -331,13 +384,18 @@ class ValueInvestingCapability(Capability):
         return final[:top_n]
 
     def plan(self, objective: str, ctx: CycleContext) -> list[str]:
-        return [
+        tasks = [
             "Read fundamentals + footnotes across the universe",
             "Compute margin of safety, ROIC, leverage, owner-earnings",
             "Shortlist the most undervalued, financially sound candidates",
             "Research recent news on the shortlist; discount hype",
             "Rank by risk-adjusted expected return; write Buffett-style memos",
         ]
+        # The whole-market funnel is a live-data cycle: include it only when a real
+        # brain + SEC identity are present (keeps offline/mock runs deterministic).
+        if not ctx.config.mock_mode and ctx.config.edgar_identity:
+            tasks.append(SCREEN_TASK)
+        return tasks
 
     def _research_news(self, ctx: CycleContext, picks: list[str]) -> int:
         """Read recent news on the shortlist and store it (untrusted) so the
@@ -366,7 +424,33 @@ class ValueInvestingCapability(Capability):
                               rationale=f"read news on {researched} names", decision="INFO")
         return researched
 
+    def _execute_screen(self, task: str, ctx: CycleContext) -> CycleResult:
+        """A run cycle that runs the whole-market funnel: screen → value → deep-read
+        finalists' full 10-Ks → judge. Its output (picks + rationales) is reflected
+        into memory, so the same `nyx run` both evolves the analyst and produces a
+        current, filings-grounded shortlist."""
+        picks = self.screen_today(ctx, top_n=8)
+        if not picks:
+            return CycleResult(item=task, ok=True, score=None,
+                               summary="Current screen unavailable (live SEC/price data).",
+                               lessons=[])
+        lines = [f"{a.ticker}: conviction {a.llm_score:.1f}/10, final {a.final_score:.3f}"
+                 f"{' [13F-owned]' if a.held_by else ''} — {a.rationale[:80]}" for a in picks]
+        memo = ("CURRENT SCREEN (today) — read full 10-Ks, footnotes, 8-K, insider, 13F; "
+                "ranked by conviction + value factors; no guarantees:\n" + "\n".join(lines))
+        violations = check_investing(memo)
+        lessons = [(f"CURRENT SCREEN — top conviction picks today: "
+                    f"{', '.join(a.ticker for a in picks[:5])}.",
+                    "research", ["investing", "screen", "current"])]
+        return CycleResult(
+            item=task, ok=not violations, summary=memo, score=round(picks[0].final_score, 4),
+            blocked_at=None if not violations else "G_INVESTING",
+            findings=violations, lessons=lessons,
+        )
+
     def execute(self, task: str, ctx: CycleContext) -> CycleResult:
+        if task == SCREEN_TASK:
+            return self._execute_screen(task, ctx)
         bench = self.benchmark(ctx)
         genome = ctx.genomes.get("analyst")
         res = bench.evaluate(genome)

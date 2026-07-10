@@ -122,6 +122,17 @@ class Constitution:
                 return gate
         return None
 
+    # A match is NOT a violation when the same clause is *forbidding* the act
+    # ("never fabricate results", "do not bypass the audit") — an agent restating
+    # its own rules must not be blocked for it. Fixed-width window before the hit.
+    _NEGATION_RE = re.compile(
+        r"(?:never|not|don'?t|do\s+not|no|without|avoid|forbid\w*|prohibit\w*|"
+        r"refuse\w*|reject\w*)\s+[\w\s,;:'\"-]{0,40}$", re.IGNORECASE)
+
+    def _negated(self, low: str, start: int) -> bool:
+        line_start = low.rfind("\n", 0, start) + 1
+        return bool(self._NEGATION_RE.search(low[line_start:start]))
+
     # -- enforcement ---------------------------------------------------------
     def check_forbidden(self, text: str) -> list[str]:
         """Heuristic scan for declared-forbidden behaviors in an artifact."""
@@ -141,7 +152,14 @@ class Constitution:
         }
         for item in self.forbidden:
             key = next((k for k in signals if k in item.lower()), None)
-            if key and any(re.search(p, low) for p in signals[key]):
+            if not key:
+                continue
+            hit = any(
+                not self._negated(low, m.start())
+                for p in signals[key]
+                for m in re.finditer(p, low)
+            )
+            if hit:
                 violations.append(f"forbidden: {item}")
         return violations
 

@@ -68,6 +68,8 @@ def cmd_run(args) -> int:
         cfg.autonomy = args.autonomy
     if args.fanout:
         cfg.fanout = args.fanout
+    if getattr(args, "max_calls", None):
+        cfg.max_calls = args.max_calls
     print(_banner(cfg) + "\n")
 
     # ONE loop for every goal: route semantically (LLM when live, keyword
@@ -78,13 +80,20 @@ def cmd_run(args) -> int:
     provider = build_provider(cfg)
     cap = route(args.objective, cfg, provider)
     print(f"capability: {cap.name} — {cap.description}\n")
+    # --max-cycles -1 = unlimited (bounded by --hours and the call budget).
+    max_cycles = None if args.max_cycles is not None and args.max_cycles < 0 \
+        else (args.max_cycles or 6)
+    if getattr(args, "hours", None):
+        print(f"time budget: {args.hours}h — learning compounds until the clock "
+              f"or the call budget ({cfg.max_calls}) ends\n")
     runner = CapabilityRunner(cap, config=cfg, provider=provider)
     report = runner.run(
         args.objective,
-        max_cycles=args.max_cycles or 6,
+        max_cycles=max_cycles,
         evolve_every=args.evolve_every,
         generations=args.generations,
         keep_going=args.keep_going,
+        hours=getattr(args, "hours", None),
     )
     print("\n" + report.summary())
     return 0
@@ -174,10 +183,31 @@ def cmd_bench(args) -> int:
 
 def cmd_memory(args) -> int:
     """Inspect or query the factory's semantic memory (learned lessons)."""
+    from pathlib import Path
+
     from .memory import MemoryStore
 
     cfg = load_config()
-    store = MemoryStore(cfg.memory_path)
+    base = Path(cfg.memory_path)
+    # Compartmentalized stores: memory-<capability>.jsonl next to the shared file.
+    partitions = sorted(base.parent.glob(f"{base.stem}-*{base.suffix}"))
+    if getattr(args, "capability", None):
+        target = base.with_name(f"{base.stem}-{args.capability}{base.suffix}")
+        if not target.exists():
+            names = [p.stem.replace(f"{base.stem}-", "") for p in partitions]
+            print(f"No memory store for '{args.capability}'. "
+                  f"Available: {', '.join(names) or '(none — shared store only)'}")
+            return 1
+        store = MemoryStore(target)
+        print(f"[store: {target.name}]")
+    else:
+        store = MemoryStore(cfg.memory_path)
+        if partitions:
+            parts = ", ".join(
+                f"{p.stem.replace(base.stem + '-', '')} ({sum(1 for _ in p.open(encoding='utf-8'))})"
+                for p in partitions)
+            print(f"[shared store: {base.name} — partitions: {parts}; "
+                  f"view one with --capability <name>]")
     if args.consolidate:
         stats = store.consolidate()
         print(f"Consolidation ('sleep') complete: {stats}")
@@ -599,7 +629,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     r = sub.add_parser("run", help="autonomous mission: plan, build, evolve, repeat")
     r.add_argument("objective", help="the high-level objective to pursue")
-    r.add_argument("--max-cycles", type=int, default=6, help="cap on build cycles")
+    r.add_argument("--max-cycles", type=int, default=6,
+                   help="cap on build cycles (-1 = unlimited; pair with --hours)")
+    r.add_argument("--hours", type=float, default=None,
+                   help="wall-clock budget, e.g. 8 or 72 — run lights-out until it ends")
+    r.add_argument("--max-calls", type=int, default=None,
+                   help="override the model-call budget (NYX_MAX_CALLS) for this run")
     r.add_argument("--evolve-every", type=int, default=2, help="evolve every N cycles (0=never)")
     r.add_argument("--generations", type=int, default=4, help="evolution generations per round")
     r.add_argument("--evolve-role", default="coder", help="which role to evolve")
@@ -621,6 +656,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     m = sub.add_parser("memory", help="inspect or query learned lessons")
     m.add_argument("--recall", help="query memory for lessons relevant to this text")
+    m.add_argument("--capability", help="view one capability's partition "
+                                        "(e.g. advisor, value-investing)")
     m.add_argument("--consolidate", action="store_true",
                    help="run a consolidation 'sleep' pass (decay, abstract, prune)")
     m.add_argument("--tail", type=int, default=20)

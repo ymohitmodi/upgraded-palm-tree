@@ -34,13 +34,24 @@ from dataclasses import dataclass, field
 from ...agents.base import Agent, Genome
 
 # Investing-flavored charter directives the engine can graft during evolution.
+# A broad pool (with varied factor emphasis and intensity) enlarges the reachable
+# doctrine space, so evolution keeps finding admissible gains instead of plateauing
+# after a couple of grafts. Each maps onto the four factors by its keywords.
 INVESTING_DIRECTIVES = [
     "Require a margin of safety of at least 30% versus conservative intrinsic value.",
+    "Demand a deep margin of safety; buy far below intrinsic value or not at all.",
     "Strongly prefer high return on invested capital (ROIC) and durable moats.",
+    "Insist on a durable competitive moat with high, stable ROIC and pricing power.",
     "Penalize leverage: avoid high debt-to-equity; read the footnotes for hidden debt.",
+    "Treat balance-sheet debt and off-balance-sheet leases as disqualifying risk.",
     "Value owner-earnings yield (distributable cash), not accounting EPS.",
+    "Prize consistent, growing owner-earnings and free cash flow across cycles.",
     "Never guarantee returns; protect against permanent loss of capital first.",
+    "Avoid value traps: cheapness without quality or a catalyst is not a buy.",
+    "Require insider alignment and honest, owner-oriented capital allocation.",
     "Stay within the circle of competence; favor simple, predictable businesses.",
+    "Prefer asset-light compounders that reinvest at high rates of return.",
+    "Discount hype; weight the filings and footnotes over the narrative.",
 ]
 
 
@@ -132,20 +143,24 @@ def genome_factor_weights(genome: Genome | None) -> dict:
     text = (genome.system_prompt.lower() if genome else "")
 
     def hits(*terms: str) -> float:
-        return min(sum(text.count(t) for t in terms), 2)
+        # Cap at 3 (was 2) so a richer directive pool yields finer weight gradation
+        # — more distinguishable genomes for evolution to select among.
+        return min(sum(text.count(t) for t in terms), 3)
 
-    base["mos"] += 1.5 * hits("margin of safety", "intrinsic")
-    base["roic"] += 1.5 * hits("roic", "moat", "quality")
-    base["debt"] += 1.5 * hits("debt", "leverage", "footnote")
-    base["oey"] += 1.5 * hits("owner-earnings", "owner earnings", "distributable cash")
+    base["mos"] += 1.0 * hits("margin of safety", "intrinsic", "cheap", "undervalu", "below")
+    base["roic"] += 1.0 * hits("roic", "moat", "quality", "compounder", "reinvest")
+    base["debt"] += 1.0 * hits("debt", "leverage", "footnote", "lease", "balance-sheet")
+    base["oey"] += 1.0 * hits("owner-earnings", "owner earnings", "distributable cash",
+                              "free cash flow", "cash flow")
     return base
 
 
-def llm_factor_weights(genome: Genome | None, config, provider) -> dict:
+def llm_factor_weights(genome: Genome | None, config, provider, *, metrics=None) -> dict:
     """Ask the model how strongly the analyst's charter emphasizes each factor.
 
     No substring rules: the LLM reads the doctrine and rates each factor 0–3.
-    Falls back to the deterministic reader on mock mode or any parse failure."""
+    Falls back to the deterministic reader on mock mode or any parse failure.
+    Pass ``metrics`` to account the call against the run budget."""
     if genome is None or config is None or provider is None or config.mock_mode:
         return genome_factor_weights(genome)
     from ...providers.base import ChatMessage
@@ -159,8 +174,12 @@ def llm_factor_weights(genome: Genome | None, config, provider) -> dict:
     )
     try:
         # Enough headroom for a reasoning model to finish thinking and then answer.
-        out = provider.chat(config.model("fast"), [ChatMessage(role="user", content=prompt)],
-                            temperature=0.0, max_tokens=512).text
+        completion = provider.chat(config.model("fast"),
+                                   [ChatMessage(role="user", content=prompt)],
+                                   temperature=0.0, max_tokens=512)
+        if metrics is not None:
+            metrics.record_call(completion.prompt_tokens, completion.completion_tokens)
+        out = completion.text
         nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", out)][:4]
         if len(nums) == 4:
             return {f: min(max(n, 0.0), 3.0) for f, n in zip(_FACTORS, nums)}

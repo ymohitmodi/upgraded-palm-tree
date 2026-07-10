@@ -75,9 +75,10 @@ def test_keyword_stuffing_saturates():
 
     once = genome_factor_weights(Genome(role="analyst", system_prompt="margin of safety"))
     spam = genome_factor_weights(Genome(role="analyst", system_prompt="margin of safety " * 40))
+    # Saturates at the cap (3 mentions); further repetition adds no weight.
     assert spam["mos"] == genome_factor_weights(
-        Genome(role="analyst", system_prompt="margin of safety margin of safety"))["mos"]
-    assert spam["mos"] <= once["mos"] * 2
+        Genome(role="analyst", system_prompt="margin of safety " * 3))["mos"]
+    assert spam["mos"] <= once["mos"] * 3
 
 
 def test_compaction_respects_budget_and_line_boundaries(config, constitution_path):
