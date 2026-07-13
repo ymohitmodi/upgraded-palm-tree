@@ -148,6 +148,31 @@ class MemoryStore:
         """
         return [lesson for lesson, _rel, _score in self.recall_scored(query, k=k, kind=kind)]
 
+    def attach_doctrine(self, *stores: "MemoryStore") -> None:
+        """Federate other capabilities' stores for cross-domain doctrine recall.
+
+        With per-capability memory, the investor's Buffett principles and the
+        advisor's career doctrine live in separate files. Attaching them here lets
+        :meth:`recall_doctrine` surface durable, trusted principles from ALL of
+        them — so Buffett's compounding lens can inform an EB-1A research agenda,
+        and a research-rigor lesson can sharpen a stock memo — without merging the
+        noisy per-domain research."""
+        self._doctrine_stores = [s for s in stores if s is not self]
+
+    def recall_doctrine(self, query: str, k: int = 4) -> list[Lesson]:
+        """Cross-store recall of durable, TRUSTED principles only (never noisy or
+        untrusted research). Pulls from this store plus any attached via
+        :meth:`attach_doctrine`, deduped, best-first."""
+        pool = [self, *getattr(self, "_doctrine_stores", [])]
+        seen: dict[str, tuple[float, Lesson]] = {}
+        for store in pool:
+            for lesson, rel, _score in store.recall_scored(query, k=k * 2, touch=False):
+                if lesson.trusted and lesson.tier == "long_term" and rel > 0.0:
+                    prev = seen.get(lesson.id)
+                    if prev is None or rel > prev[0]:
+                        seen[lesson.id] = (rel * lesson.weight, lesson)
+        return [ln for _, ln in sorted(seen.values(), key=lambda x: x[0], reverse=True)[:k]]
+
     def recall_scored(self, query: str, k: int = 5, kind: str | None = None,
                       *, touch: bool = True) -> list[tuple[Lesson, float, float]]:
         """Like :meth:`recall` but returns ``(lesson, relevance, score)`` triples.

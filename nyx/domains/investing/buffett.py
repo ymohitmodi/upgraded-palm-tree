@@ -68,30 +68,39 @@ def letter_urls(start: int = 1977, end: int = 2024) -> list[tuple[int, str]]:
     return urls
 
 
-def fetch_letters(fetcher, memory, *, start: int = 1977, end: int = 2024, excerpt: int = 800) -> dict:
-    """Live: fetch letters and store sourced excerpts as long-term memories.
+def fetch_letters(fetcher, memory, *, start: int = 1977, end: int = 2024, excerpt: int = 800,
+                  config=None, provider=None) -> dict:
+    """Live: fetch shareholder letters and store them as long-term memories.
 
-    Requires network access to berkshirehathaway.com. Returns {fetched, skipped}.
+    Reads the **entire** run of letters (1977→``end`` by default). PDFs (years
+    ≥ 1998) are extracted to real text by the fetcher's pypdf path, so the whole
+    letter is prose, not mojibake. When ``config``/``provider`` are supplied each
+    letter is read end-to-end through the long-document engine (chunk → fold →
+    embed, nothing truncated), so the analyst absorbs the full argument, not an
+    800-char excerpt. Returns {fetched, skipped}.
     """
+    from ...context import digest_to_memory
+
     fetched = skipped = 0
     for year, url in letter_urls(start, end):
         try:
             doc = fetcher.fetch(url)
-            if not (200 <= doc.status < 300) or not doc.text.strip():
-                skipped += 1
-                continue
-            # Guard: PDFs (years >= 1998) decode to mojibake, not prose — never
-            # store binary garbage as a long-term memory.
             body = doc.text.lstrip()
-            if body.startswith("%PDF") or doc.text.count("�") > max(20, len(doc.text) // 20):
+            if (not (200 <= doc.status < 300) or len(body) < 200
+                    or body.startswith("%PDF")
+                    or doc.text.count("�") > max(20, len(doc.text) // 20)):
                 skipped += 1
                 continue
-            text = f"Berkshire {year} shareholder letter (source: {url}): {doc.text[:excerpt]}"
-            # Fetched primary source → UNTRUSTED: recallable, but not forced into
-            # long-term doctrine (curated PRINCIPLES carry the trusted doctrine).
-            memory.remember(text, kind="research",
-                            tags=["buffett", "letter", str(year)], source=url,
-                            weight=1.5, trusted=False)
+            if config is not None:
+                # Full-letter read: the whole argument, folded and embedded.
+                digest_to_memory(memory, doc.text, source=url,
+                                 tags=["buffett", "letter", str(year), "full-read"],
+                                 config=config, provider=provider)
+            else:
+                memory.remember(
+                    f"Berkshire {year} shareholder letter (source: {url}): {doc.text[:excerpt]}",
+                    kind="research", tags=["buffett", "letter", str(year)],
+                    source=url, weight=1.5, trusted=False)  # untrusted primary source
             fetched += 1
         except Exception:  # noqa: BLE001 — best effort; never stall the loop
             skipped += 1

@@ -442,10 +442,39 @@ def cmd_screen(args) -> int:
 
 
 def cmd_mcp_init(args) -> int:
-    """Write a starter MCP manifest registering a SEC EDGAR server."""
-    from .tools.mcp import write_edgartools_manifest, write_sample_manifest
+    """Write a starter MCP manifest registering one or more servers (factory)."""
+    from .tools.mcp import (
+        MCP_CATALOG,
+        load_manifest,
+        write_edgartools_manifest,
+        write_manifest,
+        write_sample_manifest,
+    )
 
     cfg = load_config()
+    add = getattr(args, "add", None)
+    if getattr(args, "list", False):
+        print("MCP server catalog (nyx mcp-init --add <key>[,<key>]):")
+        for key, spec in MCP_CATALOG.items():
+            print(f"  {key:16s} {spec['note']}")
+        return 0
+    if add:
+        keys = (list(MCP_CATALOG) if add.strip().lower() == "all"
+                else [k.strip() for k in add.split(",") if k.strip()])
+        unknown = [k for k in keys if k not in MCP_CATALOG]
+        if unknown:
+            print(f"unknown server(s): {', '.join(unknown)}. "
+                  f"Known: {', '.join(MCP_CATALOG)}")
+            return 2
+        path = write_manifest(cfg.mcp_manifest, keys,
+                              identity=cfg.edgar_identity or "Your Name you@example.com")
+        names = [s.name for s in load_manifest(path)]
+        print(f"Wrote MCP manifest: {path}\nRegistered servers: {', '.join(names)}")
+        for k in keys:
+            print(f"  - {k}: install → {MCP_CATALOG[k]['note']}")
+        print("Each is callable as the 'mcp.<name>' tool. Agents pick them up "
+              "automatically on the next run.")
+        return 0
     server = getattr(args, "server", "edgartools")
     if server == "sec-edgar-mcp":
         identity = cfg.edgar_identity or "Your Name (your@email.com)"
@@ -703,10 +732,14 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--top", type=int, default=8, help="how many names to shortlist")
     sc.set_defaults(func=cmd_screen)
 
-    mi = sub.add_parser("mcp-init", help="write a starter MCP manifest (SEC EDGAR)")
+    mi = sub.add_parser("mcp-init", help="write/merge an MCP manifest (server factory)")
     mi.add_argument("--server", choices=["edgartools", "sec-edgar-mcp"], default="edgartools",
                     help="edgartools (python -m edgar.ai, no Docker; default) "
                          "or sec-edgar-mcp (Docker)")
+    mi.add_argument("--add", help="merge servers from the catalog, comma-separated "
+                                  "(e.g. paper-search,web-researcher,hexstrike-ai) "
+                                  "or 'all' for every catalog server")
+    mi.add_argument("--list", action="store_true", help="list the MCP server catalog")
     mi.set_defaults(func=cmd_mcp_init)
 
     sk = sub.add_parser("skills", help="sync markdown skills into long-term memory")

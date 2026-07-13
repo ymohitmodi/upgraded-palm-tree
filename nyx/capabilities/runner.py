@@ -84,6 +84,11 @@ class CapabilityRunner:
                 memory_path = str(p.with_name(f"{p.stem}-{self.cap.name}{p.suffix}"))
             self.memory = MemoryStore(memory_path,
                                       embedder=embedder_for(self.config, self.provider))
+            # Federate sibling capability stores for cross-domain DOCTRINE recall
+            # (trusted long-term principles only): Buffett's lens can sharpen an
+            # EB-1A agenda; research rigor can sharpen a stock memo.
+            if self.config.memory_per_capability:
+                self._attach_sibling_doctrine(Path(self.config.memory_path))
         self.archive = archive if archive is not None else Archive(self.config.evolution_archive)
         self.metrics = Metrics()
         base = Constitution.load(self.config.constitution_path, mode=self.config.constitution_mode)
@@ -93,6 +98,16 @@ class CapabilityRunner:
         from ..context_broker import ContextBroker
         self._broker = ContextBroker(budget_chars=max(800, self.config.context_char_budget // 2))
         self.genomes: dict = {}
+
+    def _attach_sibling_doctrine(self, base) -> None:
+        from ..embeddings import embedder_for
+        own = str(self.memory.path)
+        embedder = embedder_for(self.config, self.provider)
+        siblings = [MemoryStore(p, embedder=embedder)
+                    for p in sorted(base.parent.glob(f"{base.stem}-*{base.suffix}"))
+                    if str(p) != own]
+        if siblings:
+            self.memory.attach_doctrine(*siblings)
 
     @property
     def budget_left(self) -> int:

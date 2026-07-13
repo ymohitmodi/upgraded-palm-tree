@@ -151,7 +151,20 @@ class WebFetcher:
             self._last_hit[host] = time.time() + max(0.0, wait)
         if wait > 0:
             time.sleep(wait)
-        status, body, final_url = self.transport(url, {"User-Agent": self.user_agent})
+        # Ask for uncompressed content: some hosts (e.g. berkshirehathaway.com's
+        # 1977-1997 .html letters) serve Brotli/gzip that stdlib urllib won't
+        # auto-inflate, yielding binary. `identity` sidesteps that portably.
+        headers = {"User-Agent": self.user_agent, "Accept-Encoding": "identity"}
+        status, body, final_url = self.transport(url, headers)
+
+        # Defense in depth: if a body still arrives gzip-compressed, inflate it.
+        if body[:2] == b"\x1f\x8b":
+            import gzip
+
+            try:
+                body = gzip.decompress(body)
+            except OSError:  # not actually gzip — leave as-is
+                pass
 
         # PDFs (e.g. Berkshire letters) are binary — extract text, don't decode
         # the raw bytes into garbage.

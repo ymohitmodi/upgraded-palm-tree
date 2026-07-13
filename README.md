@@ -334,6 +334,21 @@ today's fetched arXiv/news titles. Deliverables are **multipass-refined**
 (draft → skeptical critique → revision, keeping the better version) and scored
 by a deliverable rubric that also drives evolution.
 
+### MCP server factory — add tools without code
+
+`nyx mcp-init` is a factory: name servers from the catalog and each registers as
+an `mcp.<name>` tool that agents pick up automatically.
+
+```powershell
+nyx mcp-init --list                                        # the catalog
+nyx mcp-init --add edgartools,paper-search,web-researcher  # additive merge
+# Catalog: edgartools (SEC), paper-search (arXiv/PubMed papers),
+#          web-researcher (deep web), hexstrike-ai (AI-security, authorized use).
+```
+Then install the server binaries you enabled (`uvx paper-search-mcp`,
+`npx web-researcher-mcp`, etc.) — NYX calls them via `mcp.<name>` under each
+capability's least-privilege allowlist.
+
 Research tools available to every agent: `arxiv_search` (relevance-ranked papers),
 `news_search` (Google News), `web_fetch`/`web_crawl`/`read_url` (full-document
 reads), and any `mcp.*` server you register. For patents, allowlist

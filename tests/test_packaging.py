@@ -18,8 +18,9 @@ def test_installer_is_executable_and_sane():
     inst = ROOT / "install.sh"
     assert inst.exists()
     body = inst.read_text()
-    assert 'pip install -e ".[investing,dev]"' in body
+    assert '".[http,yaml,investing,dev]"' in body      # full live stack incl. brotli
     assert "nyx preflight" in body and "nyx doctor" in body
+    assert "mcp-init --add all" in body                # MCP servers registered on install
     # executable bit set
     assert inst.stat().st_mode & 0o111
 

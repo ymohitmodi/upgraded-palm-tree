@@ -35,27 +35,44 @@ if ($InstallOllamaApp) {
 }
 
 # 3. Virtual environment + install --------------------------------------------
+# Use an existing Python 3.10+ if present (e.g. Miniconda); else the winget 3.11.
 Write-Host "Creating virtual environment (.venv)..." -ForegroundColor Yellow
-py -3.11 -m venv .venv
+$py = if (Get-Command py -ErrorAction SilentlyContinue) { "py -3.11" } else { "python" }
+Invoke-Expression "$py -m venv .venv"
 & .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-# investing extra bundles edgartools (live SEC/XBRL) + pypdf (read PDF letters).
-python -m pip install -e ".[http,yaml,investing]"
+# investing = edgartools (SEC/XBRL) + pypdf (PDF letters); http = requests+brotli
+# (older Berkshire letters are Brotli-encoded). Everything for a live run:
+python -m pip install -e ".[http,yaml,investing,dev]"
 
-# 4. Configuration -------------------------------------------------------------
+# 4. UTF-8 (Windows console prints NYX's checkmarks) — make it permanent --------
+[Environment]::SetEnvironmentVariable("PYTHONUTF8", "1", "User")
+$env:PYTHONUTF8 = "1"
+
+# 5. Configuration -------------------------------------------------------------
 if (-not (Test-Path .env)) {
     Copy-Item .env.example .env
-    Write-Host "Created .env from template." -ForegroundColor Green
+    Write-Host "Created .env from template (flash model + per-capability memory)." -ForegroundColor Green
     $key = Read-Host "Paste your OLLAMA_API_KEY (leave blank to stay in MOCK mode)"
     if ($key) {
         (Get-Content .env) -replace '^OLLAMA_API_KEY=.*', "OLLAMA_API_KEY=$key" | Set-Content .env
-        Write-Host "OLLAMA_API_KEY saved to .env" -ForegroundColor Green
+    }
+    $ident = Read-Host "SEC EDGAR identity 'Name email' (blank to skip live SEC/investing)"
+    if ($ident) {
+        (Get-Content .env) -replace '^EDGAR_IDENTITY=.*', "EDGAR_IDENTITY=$ident" | Set-Content .env
     }
 }
 
-# 5. Smoke test ----------------------------------------------------------------
+# 6. MCP servers (factory) — register the full catalog; install binaries as noted
+Write-Host "`nRegistering MCP servers (edgartools + research + AI-security)..." -ForegroundColor Yellow
+nyx mcp-init --add all
+nyx skills          # load the deep skill packs into long-term memory
+
+# 7. Smoke test ----------------------------------------------------------------
 Write-Host "`nRunning 'nyx doctor'..." -ForegroundColor Cyan
 nyx doctor
+Write-Host "`nSetup complete. Optional MCP server binaries: 'uvx paper-search-mcp', " -ForegroundColor Cyan
+Write-Host "'npx web-researcher-mcp'; clone hexstrike-ai for AI-security research." -ForegroundColor Cyan
 
 # 6. Optional boot service -----------------------------------------------------
 if ($RegisterService) {

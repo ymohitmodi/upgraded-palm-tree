@@ -169,12 +169,25 @@ class ValueInvestingCapability(Capability):
         fetcher = WebFetcher(cache_dir=ctx.config.web_cache_dir, user_agent=ctx.config.user_agent,
                              allowed_domains=ctx.config.allowed_domains,
                              rate_limit_seconds=ctx.config.web_rate_limit_seconds)
-        # Berkshire annual letters (recent few; cached so reruns are cheap).
+        # ALL Berkshire letters (1977→present), read end-to-end into memory once
+        # (cached, so reruns are cheap). NYX_BUFFETT_LETTERS_FROM overrides the
+        # start year; the whole run is the analyst's evolving doctrine corpus.
         if not self._seeded_letters:
-            res = buffett.fetch_letters(fetcher, ctx.memory, start=2019, end=2024)
+            try:
+                start = int(os.environ.get("NYX_BUFFETT_LETTERS_FROM", "1977"))
+            except ValueError:
+                start = 1977
+            from datetime import datetime, timezone
+            end = datetime.now(tz=timezone.utc).year - 1
+            res = buffett.fetch_letters(fetcher, ctx.memory, start=start, end=end,
+                                        config=ctx.config, provider=ctx.provider)
             stats["letters"] = res.get("fetched", 0)
             stats["live"] = stats["live"] or res["fetched"] > 0
             self._seeded_letters = True
+            ctx.ledger.append("value-investing", "buffett_letters",
+                              rationale=f"read {res.get('fetched', 0)} letters "
+                                        f"({start}-{end}), {res.get('skipped', 0)} skipped",
+                              decision="INFO")
 
         ticker = self.tickers[ctx.cycle_index % len(self.tickers)]
 
@@ -347,9 +360,14 @@ class ValueInvestingCapability(Capability):
         finalists = ranked[:deep_n]
         self._deep_read_all(ctx, [c.ticker for _, c in finalists])
         owners = bellwether_holdings(identity=ctx.config.edgar_identity)
-        principles = "\n".join(
-            f"- {lesson.text}" for lesson in ctx.memory.recall(
-                "Buffett doctrine margin of safety moat owner earnings ROIC leverage", k=8))
+        # Doctrine, incl. cross-domain principles (research rigor, etc.) federated
+        # from sibling capability stores — durable wisdom, not noisy research.
+        doctrine_q = ("Buffett doctrine margin of safety moat durable competitive "
+                      "advantage owner earnings ROIC leverage compounding")
+        principles_pool = list(ctx.memory.recall(doctrine_q, k=8))
+        principles_pool += [ln for ln in ctx.memory.recall_doctrine(doctrine_q, k=4)
+                            if ln.id not in {p.id for p in principles_pool}]
+        principles = "\n".join(f"- {lesson.text}" for lesson in principles_pool)
         doctrine = genome.system_prompt if genome else ""
 
         # Stage 4 — judgment. Only the deep-read finalists get the (paid) LLM read;

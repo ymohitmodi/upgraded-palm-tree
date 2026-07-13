@@ -158,18 +158,60 @@ def read_full_10k(ticker: str, *, identity: str = "") -> str:  # pragma: no cove
         return ""
 
 
+def multiyear_financials(ticker: str, *, identity: str = "",
+                         years: int = 4) -> str:  # pragma: no cover - live only
+    """Compact multi-year statement history (revenue, net income, assets, equity,
+    cash flow) from the last ``years`` annual filings — the trend that reveals
+    whether a moat is widening, holding, or eroding versus a single snapshot."""
+    try:
+        import edgar  # type: ignore
+    except ImportError:
+        return ""
+    ident = identity or os.environ.get("EDGAR_IDENTITY", "")
+    if not ident:
+        return ""
+    try:
+        edgar.set_identity(ident)
+        company = edgar.Company(ticker)
+        filings = company.get_filings(form="10-K")
+        rows: list[str] = []
+        for filing in list(filings)[:years]:
+            try:
+                fin = filing.obj().financials
+                fy = str(getattr(filing, "filing_date", ""))[:4]
+                def g(getter):
+                    try:
+                        return float(getattr(fin, getter)() or 0) / 1e9
+                    except Exception:  # noqa: BLE001
+                        return 0.0
+                rows.append(
+                    f"FY~{fy}: revenue ${g('get_revenue'):.2f}B, net income "
+                    f"${g('get_net_income'):.2f}B, assets ${g('get_total_assets'):.2f}B, "
+                    f"equity ${g('get_stockholders_equity'):.2f}B, capex "
+                    f"${abs(g('get_capital_expenditures')):.2f}B")
+            except Exception:  # noqa: BLE001 — one bad filing must not sink the trend
+                continue
+        return "MULTI-YEAR TREND (newest first):\n" + "\n".join(rows) if rows else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def ingest_full_10k(memory, ticker: str, *, identity: str = "",
                     config=None, provider=None):  # pragma: no cover - live only
     """Read a company's ENTIRE latest 10-K into memory via the long-document engine
-    (chunk → fold → embed) so nothing is truncated. Returns the digest or None."""
+    (chunk → fold → embed) so nothing is truncated, appended with a multi-year
+    statement trend. Returns the digest or None."""
     from ...context import digest_to_memory
 
     text = read_full_10k(ticker, identity=identity)
     if len(text) < 500:
         return None
+    trend = multiyear_financials(ticker, identity=identity)
+    if trend:
+        text = f"{trend}\n\n{text}"
     return digest_to_memory(
         memory, text, source=f"10-K:{ticker}",
-        tags=["sec", ticker.lower(), "10-k", "full-read", "footnotes"],
+        tags=["sec", ticker.lower(), "10-k", "full-read", "footnotes", "multi-year"],
         config=config, provider=provider,
     )
 

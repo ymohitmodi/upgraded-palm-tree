@@ -47,19 +47,25 @@ if [ "$MINIMAL" -eq 1 ]; then
   echo "Installing core (mock mode, dependency-free)…"
   python -m pip install -e .
 else
-  echo "Installing NYX + investing + dev extras…"
-  python -m pip install -e ".[investing,dev]"
+  # http adds requests+brotli (older Berkshire letters are Brotli-encoded);
+  # investing adds edgartools (SEC/XBRL) + pypdf (PDF letters).
+  echo "Installing NYX + http + investing + dev extras…"
+  python -m pip install -e ".[http,yaml,investing,dev]"
 fi
 
 # 4. Config
 if [ ! -f .env ]; then
   cp .env.example .env
-  echo "Created .env (MOCK mode until you set OLLAMA_API_KEY)."
+  echo "Created .env (flash model + per-capability memory; MOCK until OLLAMA_API_KEY set)."
 fi
 
-# 5. Load the shipped skill packs into long-term memory
+# 5. Skill packs + MCP servers (factory: edgartools + research + AI-security)
 echo "Loading skill packs into memory…"
 nyx skills >/dev/null || true
+if [ "$MINIMAL" -eq 0 ]; then
+  echo "Registering MCP servers (nyx mcp-init --add all)…"
+  nyx mcp-init --add all >/dev/null || true
+fi
 
 # 6. Health + readiness
 echo; echo "--- nyx doctor ---";    nyx doctor    || true

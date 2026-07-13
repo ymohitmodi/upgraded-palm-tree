@@ -83,6 +83,78 @@ def write_sample_manifest(path: str | Path,
     return p
 
 
+# ── MCP server factory ───────────────────────────────────────────────────────
+# A catalog of known, useful MCP servers. `nyx mcp-init --add <key>` merges any
+# of these into the manifest, and register_mcp_servers exposes each as an
+# `mcp.<name>` tool — so agents reach new capabilities (papers, web research, AI
+# security tooling) with no code change. `{python}` / `{identity}` are filled in.
+MCP_CATALOG: dict[str, dict] = {
+    # SEC EDGAR — XBRL financials, filings, 13F, Form 4 (pip: edgartools[ai]).
+    "edgartools": {
+        "command": "{python}", "args": ["-m", "edgar.ai"],
+        "env": {"EDGAR_IDENTITY": "{identity}"},
+        "note": "pip install 'edgartools[ai]'  (https://github.com/sareegpt/edgartools-mcp)",
+    },
+    # Academic paper search across arXiv, PubMed, bioRxiv, etc.
+    "paper-search": {
+        "command": "uvx", "args": ["paper-search-mcp"], "env": {},
+        "note": "uvx paper-search-mcp  (https://github.com/openags/paper-search-mcp)",
+    },
+    # General web research / deep reading.
+    "web-researcher": {
+        "command": "npx", "args": ["-y", "web-researcher-mcp"], "env": {},
+        "note": "npx web-researcher-mcp  (https://github.com/zoharbabin/web-researcher-mcp)",
+    },
+    # Offensive/defensive AI security tooling for research (authorized use only).
+    "hexstrike-ai": {
+        "command": "{python}", "args": ["-m", "hexstrike_ai"], "env": {},
+        "note": "clone + install https://github.com/0x4m4/hexstrike-ai (authorized "
+                "security research only; review before enabling)",
+    },
+}
+
+
+def build_manifest(servers: list[str], *, identity: str = "Your Name your@email.com",
+                   python_exe: str | None = None, existing: dict | None = None) -> dict:
+    """Assemble (or merge into) an ``mcpServers`` manifest from the catalog.
+
+    The factory: name the servers you want; each catalog entry's placeholders are
+    filled and merged into the manifest. Unknown names are ignored (a typo can't
+    silently disable a server). ``existing`` is merged so ``--add`` is additive."""
+    import sys
+
+    manifest = {"mcpServers": dict((existing or {}).get("mcpServers", {}))}
+    subs = {"python": python_exe or sys.executable, "identity": identity}
+    for name in servers:
+        spec = MCP_CATALOG.get(name)
+        if spec is None:
+            continue
+        manifest["mcpServers"][name] = {
+            "command": spec["command"].format(**subs),
+            "args": [a.format(**subs) for a in spec["args"]],
+            "env": {k: v.format(**subs) for k, v in spec["env"].items()},
+        }
+    return manifest
+
+
+def write_manifest(path: str | Path, servers: list[str], *,
+                   identity: str = "Your Name your@email.com",
+                   python_exe: str | None = None, merge: bool = True) -> Path:
+    """Write/merge a manifest registering ``servers`` from the catalog."""
+    p = Path(path)
+    existing = None
+    if merge and p.exists():
+        try:
+            existing = json.loads(p.read_text(encoding="utf-8"))
+        except ValueError:
+            existing = None
+    p.parent.mkdir(parents=True, exist_ok=True)
+    manifest = build_manifest(servers, identity=identity, python_exe=python_exe,
+                              existing=existing)
+    p.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return p
+
+
 def write_edgartools_manifest(path: str | Path, identity: str = "Your Name your@email.com",
                               python_exe: str | None = None) -> Path:
     """Write a manifest registering the pip-installed ``edgartools`` MCP server

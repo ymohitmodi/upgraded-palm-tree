@@ -17,11 +17,13 @@ keywords = ["agents", "dark-factory", "agentic", "ollama", "constitutional-ai", 
 dependencies = []
 
 [project.optional-dependencies]
-http = ["requests>=2.31"]
+# brotli lets requests auto-inflate Brotli-encoded responses (e.g. the older
+# Berkshire shareholder letters, which the server always serves as `br`).
+http = ["requests>=2.31", "brotli>=1.1"]
 yaml = ["PyYAML>=6.0"]
 # Live SEC EDGAR / XBRL access (same engine as the edgartools MCP server).
 # pypdf extracts text from PDF primary sources (e.g. Berkshire shareholder letters).
-investing = ["edgartools[ai]>=2.0", "requests>=2.31", "pypdf>=4.0"]
+investing = ["edgartools[ai]>=2.0", "requests>=2.31", "pypdf>=4.0", "brotli>=1.1"]
 dev = ["pytest>=8.0", "ruff>=0.5", "PyYAML>=6.0"]
 
 [project.scripts]
