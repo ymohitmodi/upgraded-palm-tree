@@ -184,9 +184,18 @@ class CapabilityRunner:
             idx += 1
             ctx = self._ctx(idx)
 
-            # Keep reading the world (SEC filings, annual reports, …).
+            # Keep reading the world (SEC filings, annual reports, …). Guarded: a
+            # transient network/tool failure here must cost one cycle's knowledge
+            # refresh, never the whole multi-hour mission (KeyboardInterrupt/
+            # SystemExit are BaseException, not Exception, so Ctrl+C still works).
             if refresh_every and idx % refresh_every == 0:
-                stats = self.cap.refresh_knowledge(ctx)
+                try:
+                    stats = self.cap.refresh_knowledge(ctx)
+                except Exception as exc:  # noqa: BLE001
+                    stats = None
+                    self.ledger.append("capability", "refresh_knowledge_error",
+                                       rationale=f"{type(exc).__name__}: {exc}"[:200],
+                                       decision="BLOCK")
                 if stats:
                     report.knowledge_refreshes += 1
                     self.ledger.append("capability", "refresh_knowledge",
@@ -202,7 +211,15 @@ class CapabilityRunner:
                                    rationale=f"{len(bundle.lessons)} lessons, "
                                              f"{bundle.dropped} dropped, {bundle.chars} chars",
                                    decision="INFO")
-            result = self.cap.execute(item, ctx)
+            try:
+                result = self.cap.execute(item, ctx)
+            except Exception as exc:  # noqa: BLE001 — one bad cycle must not end the mission
+                result = CycleResult(item=item, ok=False,
+                                     summary=f"cycle failed: {type(exc).__name__}: {exc}"[:400],
+                                     blocked_at="ERROR")
+                self.ledger.append("capability", "cycle_error",
+                                   rationale=f"{item[:60]} -> {type(exc).__name__}: {exc}"[:200],
+                                   decision="BLOCK")
             report.cycles.append(result)
 
             # Reflect the capability's lessons into memory.
@@ -214,22 +231,40 @@ class CapabilityRunner:
                                decision="PASS" if result.ok else "BLOCK",
                                data={"summary": result.summary[:400]})
 
-            # Evolve the doctrine against the capability's benchmark.
+            # Evolve the doctrine against the capability's benchmark. Guarded: a
+            # benchmark call that hits the network (e.g. the advisor's rubric,
+            # which runs agent.run()) must not end the mission on a hiccup.
             if evolve_every and idx % evolve_every == 0 and self.budget_left > 0:
-                self._evolve(generations)
-                report.evolutions += 1
+                try:
+                    self._evolve(generations)
+                    report.evolutions += 1
+                except Exception as exc:  # noqa: BLE001
+                    self.ledger.append("capability", "evolution_error",
+                                       rationale=f"{type(exc).__name__}: {exc}"[:200],
+                                       decision="BLOCK")
 
-            # Sleep: consolidate short-term lessons into long-term memory.
+            # Sleep: consolidate short-term lessons into long-term memory. Pure
+            # local computation (no network), but guarded on principle — a bad
+            # lesson's embedding must not stall an otherwise-healthy long run.
             if consolidate_every and idx % consolidate_every == 0:
-                stats = self.memory.consolidate()
-                report.consolidations += 1
-                self.ledger.append("capability", "consolidate", rationale=str(stats)[:120],
-                                   decision="INFO")
+                try:
+                    stats = self.memory.consolidate()
+                    report.consolidations += 1
+                    self.ledger.append("capability", "consolidate", rationale=str(stats)[:120],
+                                       decision="INFO")
+                except Exception as exc:  # noqa: BLE001
+                    self.ledger.append("capability", "consolidate_error",
+                                       rationale=f"{type(exc).__name__}: {exc}"[:200],
+                                       decision="BLOCK")
 
             if not backlog and keep_going and (max_cycles is None or idx < max_cycles):
                 backlog = self.cap.plan(f"{objective} (continue)", ctx)
 
-        self.memory.consolidate()
+        try:
+            self.memory.consolidate()
+        except Exception as exc:  # noqa: BLE001 — final sleep must not lose the report
+            self.ledger.append("capability", "consolidate_error",
+                               rationale=f"{type(exc).__name__}: {exc}"[:200], decision="BLOCK")
         after = self._adopt()  # `is None` check: a legitimate 0.0 score is falsy
         report.genome_score_after = after if after is not None else report.genome_score_before
         report.calls = self.metrics.calls

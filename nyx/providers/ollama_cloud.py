@@ -125,7 +125,8 @@ class OllamaCloudProvider:
         try:
             import requests  # type: ignore
 
-            resp = requests.post(url, data=body, headers=self._headers(), timeout=60)
+            resp = requests.post(url, data=body, headers=self._headers(),
+                                 timeout=self._EMBED_TIMEOUT)
             resp.raise_for_status()
             data = resp.json()
         except ImportError:
@@ -144,13 +145,22 @@ class OllamaCloudProvider:
             "Content-Type": "application/json",
         }
 
+    # (connect, read) tuples — NOT a single float. A single timeout applies the
+    # same bound to establishing the connection (DNS + TCP + TLS handshake) and to
+    # waiting for a response; on a flaky network/VPN/AV-intercepted link the
+    # handshake alone can stall well past what's reasonable for "are we connected
+    # at all". A short, separate connect timeout makes that class of hang fail
+    # fast instead of freezing an unattended multi-hour `nyx run`.
+    _CHAT_TIMEOUT = (10, 180)
+    _EMBED_TIMEOUT = (10, 60)
+
     def _post(self, payload: dict) -> dict:
         body = json.dumps(payload).encode("utf-8")
         try:
             import requests  # type: ignore
 
             resp = requests.post(
-                self.endpoint, headers=self._headers(), data=body, timeout=120
+                self.endpoint, headers=self._headers(), data=body, timeout=self._CHAT_TIMEOUT
             )
             if resp.status_code >= 400:
                 raise ProviderError(f"HTTP {resp.status_code}: {resp.text[:500]}")
@@ -163,7 +173,8 @@ class OllamaCloudProvider:
             self.endpoint, data=body, headers=self._headers(), method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 (trusted host)
+            # stdlib urlopen only accepts a single timeout float — best effort.
+            with urllib.request.urlopen(req, timeout=180) as resp:  # noqa: S310 (trusted host)
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:  # pragma: no cover - network
             detail = exc.read().decode("utf-8", "replace")[:500]
