@@ -203,10 +203,12 @@ _COMPANY_FOCUS = ("this company's durable competitive moat and how it is widenin
 
 
 def ingest_full_10k(memory, ticker: str, *, identity: str = "",
-                    config=None, provider=None):  # pragma: no cover - live only
+                    config=None, provider=None,
+                    fold_with_llm: bool = False):  # pragma: no cover - live only
     """Read a company's ENTIRE latest 10-K (plus a multi-year statement trend) and
     INTERPRET it — extracting moat/risk/quality insights, not just a synthesis dump.
-    Returns the digest or None."""
+    Interpretation is one model call; ``fold_with_llm`` upgrades the per-chunk fold
+    (much costlier). Returns the digest or None."""
     from ...context import read_and_learn
 
     text = read_full_10k(ticker, identity=identity)
@@ -219,18 +221,19 @@ def ingest_full_10k(memory, ticker: str, *, identity: str = "",
     digest, _, _ = read_and_learn(
         memory, text, source=f"10-K:{ticker}",
         tags=["sec", ticker.lower(), "10-k", "full-read", "footnotes", "multi-year"],
-        focus=focus, config=config, provider=provider, doctrine=False, max_lessons=6)
+        focus=focus, config=config, provider=provider, doctrine=False, max_lessons=6,
+        fold_with_llm=fold_with_llm)
     return digest
 
 
-def ingest_company_filings(memory, toolbox, ticker: str, *,
-                           config=None, provider=None):  # pragma: no cover - live only
+def ingest_company_filings(memory, toolbox, ticker: str, *, config=None, provider=None,
+                           fold_with_llm: bool = False):  # pragma: no cover - live only
     """Read one company's filings and INTERPRET them into moat/risk/quality insights
     (untrusted, company-specific), not a raw synthesis.
 
     Returns the :class:`DocumentDigest` (chunks stay embedded for detail lookups)
-    or ``None``. Pass ``config``/``provider`` for live interpretation; omit for the
-    free deterministic fold (every chunk still read + indexed either way)."""
+    or ``None``. Interpretation costs one model call; ``fold_with_llm`` upgrades
+    the per-chunk fold (every chunk is read + indexed either way)."""
     from ...context import read_and_learn
 
     read = fetch_company_filings(toolbox, ticker)
@@ -240,7 +243,7 @@ def ingest_company_filings(memory, toolbox, ticker: str, *,
         memory, read.text, source=f"sec-filings:{ticker}",
         tags=["sec", ticker.lower(), "filings", "deep-read", "footnotes"],
         focus=f"{ticker} — {_COMPANY_FOCUS}", config=config, provider=provider,
-        doctrine=False, max_lessons=5)
+        doctrine=False, max_lessons=5, fold_with_llm=fold_with_llm)
     return digest
 
 

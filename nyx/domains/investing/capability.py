@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from pathlib import Path
 
 from ...constitution import Constitution
 from ...tools.web import WebFetcher
@@ -206,8 +207,12 @@ class ValueInvestingCapability(Capability):
                 batch_size = 4
             batch, self._letters_todo = (self._letters_todo[:batch_size],
                                          self._letters_todo[batch_size:])
+            print(f"    ↳ studying Buffett letters {batch} "
+                  f"({len(self._letters_todo)} left after this) …", flush=True)
             res = buffett.fetch_letters(fetcher, ctx.memory, years=batch,
                                         config=ctx.config, provider=ctx.provider)
+            print(f"    ↳ formed {res.get('principles', 0)} new durable principles",
+                  flush=True)
             stats["letters"] = res.get("fetched", 0)
             stats["principles"] = res.get("principles", 0)
             stats["live"] = stats["live"] or res["fetched"] > 0
@@ -286,20 +291,26 @@ class ValueInvestingCapability(Capability):
         plus structured footnotes/8-K/Form 4 via the MCP server. Distillation is the
         free deterministic fold by default; ``NYX_DEEP_READ_LLM=1`` uses the model
         (~1 call/chunk). Idempotent: a company already read is skipped."""
-        use_llm = os.environ.get("NYX_DEEP_READ_LLM", "0") == "1"
-        cfg, provider = (ctx.config, ctx.provider) if use_llm else (None, None)
+        # INTERPRETATION is always live (one model call per company — that's what
+        # turns a filing into moat/risk insights instead of raw excerpts). Only
+        # the per-chunk FOLD is gated by NYX_DEEP_READ_LLM (~1 call/chunk, ~100+
+        # per 10-K — a cost lever, not a quality prerequisite).
+        llm_fold = os.environ.get("NYX_DEEP_READ_LLM", "0") == "1"
+        cfg, provider = ctx.config, ctx.provider
         have_mcp = MCP_EDGAR in ctx.toolbox.names()
         read = 0
-        for ticker in tickers:
+        for n, ticker in enumerate(tickers, 1):
             if ticker in self._digests:
                 continue
+            print(f"    ↳ deep-reading {ticker} ({n}/{len(tickers)}) …", flush=True)
             # The entire 10-K, read whole via the long-document reader.
             digest = ingest_full_10k(ctx.memory, ticker, identity=ctx.config.edgar_identity,
-                                     config=cfg, provider=provider)
+                                     config=cfg, provider=provider, fold_with_llm=llm_fold)
             # Structured footnotes / 8-K / insider on top (recent, machine-parsed).
             if have_mcp:
                 mcp_digest = ingest_company_filings(ctx.memory, ctx.toolbox, ticker,
-                                                    config=cfg, provider=provider)
+                                                    config=cfg, provider=provider,
+                                                    fold_with_llm=llm_fold)
                 digest = digest or mcp_digest
             if digest is not None:
                 self._digests[ticker] = digest
@@ -366,9 +377,12 @@ class ValueInvestingCapability(Capability):
         as_of = today()
 
         # Stage 1 — whole-market quality screen (price-free).
+        print("    ↳ stage 1: quality-screening the whole market …", flush=True)
         candidates = self._market_candidates(ctx, fetcher)
 
         # Stage 2 — value the survivors with real prices, rank by the evolved genome.
+        print(f"    ↳ stage 2: valuing {len(candidates)} survivors with real prices "
+              "(slow: EDGAR+price per name) …", flush=True)
         universe = try_build_current_universe(candidates, as_of=as_of,
                                               identity=ctx.config.edgar_identity, fetcher=fetcher)
         if universe is None:
@@ -401,21 +415,29 @@ class ValueInvestingCapability(Capability):
         doctrine = genome.system_prompt if genome else ""
 
         # Stage 4 — judgment. Only the deep-read finalists get the (paid) LLM read;
-        # the rest keep their factor rank (offline assessment is neutral).
+        # the rest keep their factor rank (offline assessment is neutral). Every
+        # finalist is judged WITH its percentile standing against all valued
+        # alternatives — comparison is the essence of allocation (KO over PEP).
+        print(f"    ↳ stage 4: judging {min(deep_n, len(ranked))} finalists against "
+              "the doctrine …", flush=True)
+        from ..investing.assess import market_context, write_shortlist_reports
         assessments = []
         for rank_i, (factor_score, co) in enumerate(ranked):
+            mc = market_context(co, universe.companies)
             metrics = (f"market cap ${co.price / 1e9:,.1f}B; conservative intrinsic value "
                        f"${co.intrinsic_value / 1e9:,.1f}B; margin of safety "
                        f"{co.margin_of_safety:+.1%}; ROIC {co.roic:+.1%}; debt/equity "
                        f"{co.debt_to_equity:.2f}; owner-earnings yield "
-                       f"{co.owner_earnings_yield:+.1%}")
+                       f"{co.owner_earnings_yield:+.1%}. {mc}")
             judged = rank_i < deep_n and ctx.metrics.calls < ctx.config.max_calls
-            assessments.append(assess_company(
+            assessment = assess_company(
                 ctx.config if judged else None, ctx.provider if judged else None,
                 ticker=co.ticker, factor_score=factor_score, metrics=metrics,
                 principles=principles, evidence=self._evidence_for(co.ticker, ctx),
                 held_by=owners.get(co.ticker, []), doctrine=doctrine,
-                run_metrics=ctx.metrics))
+                run_metrics=ctx.metrics)
+            assessment.market_context = mc
+            assessments.append(assessment)
 
         final = rank_assessments(assessments)
         ctx.ledger.append("value-investing", "screen_today",
@@ -423,6 +445,25 @@ class ValueInvestingCapability(Capability):
                                     f"{len(universe.companies)} valued → {len(finalists)} deep-read; "
                                     f"top: {', '.join(a.ticker for a in final[:5])}",
                           decision="PASS")
+
+        # Durable, reviewable record: detailed per-name reports for the top picks,
+        # in a timestamped directory (.nyx/reports/<ts>/) you can read later.
+        if not ctx.config.mock_mode:
+            try:
+                by_ticker = {c.ticker: c for _, c in ranked}
+                report_dir = write_shortlist_reports(
+                    Path(ctx.config.ledger_path).parent, final[:min(5, top_n)],
+                    as_of=as_of, companies=by_ticker, principles=principles,
+                    evidence_fn=lambda t: self._evidence_for(t, ctx),
+                    funnel=f"funnel: {len(candidates)} screened → "
+                           f"{len(universe.companies)} valued → {len(finalists)} deep-read")
+                ctx.ledger.append("value-investing", "reports_written",
+                                  rationale=str(report_dir), decision="INFO")
+                print(f"    ↳ detailed reports: {report_dir}", flush=True)
+            except Exception as exc:  # noqa: BLE001 — reporting must never sink a screen
+                ctx.ledger.append("value-investing", "reports_error",
+                                  rationale=f"{type(exc).__name__}: {exc}"[:200],
+                                  decision="BLOCK")
         for a in final[:top_n]:
             ctx.memory.remember(
                 f"CURRENT SCREEN {as_of} — {a.ticker}: conviction {a.llm_score:.1f}/10, "

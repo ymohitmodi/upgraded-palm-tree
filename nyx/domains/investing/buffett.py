@@ -70,7 +70,12 @@ def letter_urls(start: int = 1977, end: int = 2024) -> list[tuple[int, str]]:
 
 _LETTER_FOCUS = ("what makes a business wonderful (moats, pricing power, returns on "
                  "capital), how to judge management and capital allocation, valuation "
-                 "and owner-earnings, temperament, and the mistakes to avoid")
+                 "and owner-earnings, temperament, and the mistakes to avoid; and "
+                 "critically, WHY specific investments were bought or sold at the "
+                 "prices then prevailing — what made the chosen business better than "
+                 "its direct competitors and alternatives at that moment, how cheaply "
+                 "it was bought relative to its earning power, and what would have "
+                 "changed the decision")
 
 
 def fetch_letters(fetcher, memory, *, years: list[int] | None = None,

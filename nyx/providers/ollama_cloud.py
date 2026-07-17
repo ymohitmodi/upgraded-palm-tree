@@ -125,7 +125,8 @@ class OllamaCloudProvider:
         try:
             import requests  # type: ignore
 
-            resp = requests.post(url, data=body, headers=self._headers(), timeout=60)
+            resp = requests.post(url, data=body, headers=self._headers(),
+                                 timeout=self._EMBED_TIMEOUT)
             resp.raise_for_status()
             data = resp.json()
         except ImportError:
@@ -144,26 +145,56 @@ class OllamaCloudProvider:
             "Content-Type": "application/json",
         }
 
+    # (connect, read) tuples — NOT a single float. A single timeout applies the
+    # same bound to establishing the connection (DNS + TCP + TLS handshake) and to
+    # waiting for a response; on a flaky network/VPN/AV-intercepted link the
+    # handshake alone can stall well past what's reasonable for "are we connected
+    # at all". A short, separate connect timeout makes that class of hang fail
+    # fast instead of freezing an unattended multi-hour `nyx run`.
+    _CHAT_TIMEOUT = (10, 180)
+    _EMBED_TIMEOUT = (10, 60)
+
+    # Transient-failure policy: an unattended multi-hour run WILL hit dropped
+    # connections, timeouts, and 429/5xx blips; each must cost seconds, not the
+    # mission. Deliberate interrupts (Ctrl+C) are BaseException and always pass.
+    _RETRIES = 3
+    _BACKOFF = 2.0   # seconds; grows 2s, 8s
+
     def _post(self, payload: dict) -> dict:
         body = json.dumps(payload).encode("utf-8")
         try:
             import requests  # type: ignore
-
-            resp = requests.post(
-                self.endpoint, headers=self._headers(), data=body, timeout=120
-            )
-            if resp.status_code >= 400:
-                raise ProviderError(f"HTTP {resp.status_code}: {resp.text[:500]}")
-            return resp.json()
         except ImportError:
             return self._post_stdlib(body)
+
+        import time as _time
+
+        last: Exception | None = None
+        for attempt in range(self._RETRIES):
+            try:
+                resp = requests.post(
+                    self.endpoint, headers=self._headers(), data=body,
+                    timeout=self._CHAT_TIMEOUT,
+                )
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    last = ProviderError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+                elif resp.status_code >= 400:
+                    raise ProviderError(f"HTTP {resp.status_code}: {resp.text[:500]}")
+                else:
+                    return resp.json()
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                last = exc
+            if attempt < self._RETRIES - 1:
+                _time.sleep(self._BACKOFF * (4 ** attempt))
+        raise ProviderError(f"network failed after {self._RETRIES} attempts: {last}")
 
     def _post_stdlib(self, body: bytes) -> dict:
         req = urllib.request.Request(
             self.endpoint, data=body, headers=self._headers(), method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 (trusted host)
+            # stdlib urlopen only accepts a single timeout float — best effort.
+            with urllib.request.urlopen(req, timeout=180) as resp:  # noqa: S310 (trusted host)
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:  # pragma: no cover - network
             detail = exc.read().decode("utf-8", "replace")[:500]

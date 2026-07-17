@@ -87,8 +87,19 @@ def default_embedder() -> Embedder:
 
 
 def embedder_for(config, provider) -> Embedder:
-    """Pick the best available embedder: real semantic embeddings from a live
-    provider, else the deterministic offline hashing embedder."""
-    if provider is not None and hasattr(provider, "embed") and not getattr(config, "mock_mode", True):
+    """Pick the memory embedder. LOCAL (hashing) is the default.
+
+    Embeddings only rank memory recall — they are never the intelligence. The
+    hashing embedder runs on-CPU in microseconds with zero network, so recall can
+    never hang or throttle a run. Cloud embeddings put a network round-trip inside
+    EVERY remember/recall (a store with ~1000 lessons re-embeds them all on first
+    recall — the exact stall that froze an unattended mission), buying only a
+    modest recall-ranking gain. Opt in deliberately with ``NYX_EMBEDDINGS=cloud``.
+    """
+    import os
+
+    mode = os.environ.get("NYX_EMBEDDINGS", "local").strip().lower()
+    if (mode == "cloud" and provider is not None and hasattr(provider, "embed")
+            and not getattr(config, "mock_mode", True)):
         return ProviderEmbedder(provider, getattr(config, "model_embed", "nomic-embed-text"))
     return HashingEmbedder()

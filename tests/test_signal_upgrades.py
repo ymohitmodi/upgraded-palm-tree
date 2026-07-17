@@ -43,17 +43,25 @@ def test_provider_embedder_powers_recall():
     assert isinstance(v, list) and len(v) == 256
 
 
-def test_embedder_selector_prefers_provider_when_live():
+def test_embedder_selector_is_local_first_cloud_opt_in(monkeypatch):
+    """Policy inverted deliberately: cloud embeddings put a network round-trip in
+    every remember/recall (the hang that froze an unattended run), so LOCAL is the
+    default even when a live provider exists; NYX_EMBEDDINGS=cloud opts in."""
     class Cfg:
         mock_mode = False
         model_embed = "nomic-embed-text"
 
+    monkeypatch.delenv("NYX_EMBEDDINGS", raising=False)
+    assert isinstance(embedder_for(Cfg(), MockProvider()), HashingEmbedder)
+
+    monkeypatch.setenv("NYX_EMBEDDINGS", "cloud")
     assert isinstance(embedder_for(Cfg(), MockProvider()), ProviderEmbedder)
 
     class MockCfg:
         mock_mode = True
         model_embed = "x"
 
+    # Mock mode never uses the network, regardless of the env opt-in.
     assert isinstance(embedder_for(MockCfg(), MockProvider()), HashingEmbedder)
 
 
