@@ -188,6 +188,23 @@ def llm_factor_weights(genome: Genome | None, config, provider, *, metrics=None)
     return genome_factor_weights(genome)
 
 
+_WEIGHT_KEYS = ("w_mos", "w_roic", "w_debt", "w_oey")
+
+
+def weights_for(genome: Genome | None, config=None, provider=None, *, metrics=None) -> dict:
+    """The analyst's factor weights, preferring the EVOLVED continuous genes.
+
+    When the genome carries a params vector (the richer genome), its weights are
+    authoritative and universe-independent — the same doctrine ranks the backtest
+    and today's screen. Otherwise fall back to the LLM/keyword reader, so seed and
+    legacy genomes behave exactly as before."""
+    params = getattr(genome, "params", None) or {}
+    if all(k in params for k in _WEIGHT_KEYS):
+        return {"mos": params["w_mos"], "roic": params["w_roic"],
+                "debt": params["w_debt"], "oey": params["w_oey"]}
+    return llm_factor_weights(genome, config, provider, metrics=metrics)
+
+
 def composite_rank(universe: Universe, w: dict) -> list[tuple[float, Company]]:
     """Rank a universe by the analyst's weighted composite of the four value
     factors (each cross-sectionally z-scored, so scale never matters).
@@ -235,11 +252,17 @@ class ValueBenchmark:
         self.provider = provider
 
     def evaluate(self, genome: Genome | None) -> BacktestResult:
-        # Compute the analyst's factor emphasis ONCE per evaluation (LLM when
-        # live, deterministic fallback otherwise) — genome-dependent, universe-
-        # independent, so it's reused across the walk-forward universes.
-        weights = llm_factor_weights(genome, self.config, self.provider)
-        results = [self._evaluate_one(u, weights) for u in self.universes]
+        # Factor emphasis ONCE per evaluation (evolved params → LLM → keywords),
+        # genome-dependent and universe-independent, reused across the walk-forward.
+        weights = weights_for(genome, self.config, self.provider)
+        # Risk/portfolio knobs come from the genome's evolved params too, so
+        # evolution can tune concentration, risk aversion, and margin-of-safety
+        # discipline — not just the four weights. Absent → the instance defaults.
+        p = getattr(genome, "params", None) or {}
+        top_n = max(1, min(int(round(p.get("top_n", self.top_n))), 30))
+        lam = float(p.get("downside_lambda", self.downside_lambda))
+        floor = float(p.get("mos_floor", -1.0))
+        results = [self._evaluate_one(u, weights, top_n, lam, floor) for u in self.universes]
         avg_score = round(sum(r.score for r in results) / len(results), 4)
         avg_return = round(sum(r.portfolio_return for r in results) / len(results), 4)
         avg_down = round(sum(r.downside for r in results) / len(results), 4)
@@ -247,14 +270,24 @@ class ValueBenchmark:
         return BacktestResult(picks=results[0].picks, portfolio_return=avg_return,
                               downside=avg_down, score=avg_score)
 
-    def _evaluate_one(self, universe: Universe, w: dict) -> BacktestResult:
+    def _evaluate_one(self, universe: Universe, w: dict, top_n: int | None = None,
+                      downside_lambda: float | None = None,
+                      mos_floor: float = -1.0) -> BacktestResult:
+        top_n = self.top_n if top_n is None else top_n
+        downside_lambda = self.downside_lambda if downside_lambda is None else downside_lambda
         scored = composite_rank(universe, w)
-        picks = [c for _, c in scored[: self.top_n]]
+        # Margin-of-safety discipline: prefer names clearing the floor, but never
+        # hand back an empty book — fall back to the full ranking if too few clear.
+        if mos_floor > -1.0:
+            eligible = [(s, c) for s, c in scored if c.margin_of_safety >= mos_floor]
+            if len(eligible) >= top_n:
+                scored = eligible
+        picks = [c for _, c in scored[:top_n]]
 
         port = sum(c.forward_return for c in picks) / len(picks)
         downside = sum(min(0.0, c.forward_return) for c in picks) / len(picks)
         # Risk-adjusted: reward return, punish capital loss ("don't lose money").
-        score = round(port + self.downside_lambda * downside, 4)
+        score = round(port + downside_lambda * downside, 4)
         return BacktestResult(
             picks=[c.ticker for c in picks],
             portfolio_return=round(port, 4), downside=round(downside, 4), score=score,

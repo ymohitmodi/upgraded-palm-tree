@@ -52,7 +52,11 @@ class EvolutionReport:
 
 
 def _genome_id(genome: Genome) -> str:
-    blob = f"{genome.role}|{genome.system_prompt}|{genome.temperature}|{genome.model_role}"
+    # Params are part of the identity: a param-only mutation is a distinct genome
+    # and must get its own archive id (else it collides with its parent).
+    param_blob = ";".join(f"{k}={round(v, 4)}" for k, v in sorted(genome.params.items()))
+    blob = (f"{genome.role}|{genome.system_prompt}|{genome.temperature}|"
+            f"{genome.model_role}|{genome.max_tokens}|{param_blob}")
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
 
 
@@ -69,6 +73,7 @@ class EvolutionEngine:
         seed: int = 1234,
         metrics: Metrics | None = None,
         directive_pool: list[str] | None = None,
+        param_space: dict | None = None,
     ):
         self.config = config or load_config()
         self.provider = provider or build_provider(self.config)
@@ -82,6 +87,9 @@ class EvolutionEngine:
         self.benchmark = benchmark or self._default_benchmark
         # The pool of charter directives mutation can graft on (domain-tunable).
         self.directive_pool = directive_pool or _DIRECTIVE_POOL
+        # Continuous gene space {name: (lo, hi, default)} for roles whose fitness
+        # reads numeric params (e.g. the value analyst). Empty = prompt-only role.
+        self.param_space = dict(param_space or {})
         self.rng = random.Random(seed)
         # Shared metrics let a caller (e.g. a mission) account benchmark calls
         # against one budget; otherwise the engine keeps its own counter.
@@ -107,7 +115,13 @@ class EvolutionEngine:
 
     # -- mutation ------------------------------------------------------------
     def mutate(self, genome: Genome) -> Genome:
-        op = self.rng.choice(["temperature", "directive", "model_role", "directive"])
+        ops = ["temperature", "directive", "model_role", "directive", "max_tokens"]
+        # Bias toward the continuous genes when the role has them — that is where a
+        # quantitative fitness (the value backtest) actually moves, so spending
+        # mutations there is what breaks the 4-weight plateau.
+        if self.param_space:
+            ops += ["param", "param", "param"]
+        op = self.rng.choice(ops)
         if op == "temperature":
             delta = self.rng.choice([-0.1, 0.1, 0.15, -0.05])
             new_temp = min(0.95, max(0.0, round(genome.temperature + delta, 2)))
@@ -115,6 +129,13 @@ class EvolutionEngine:
         elif op == "model_role":
             choices = ["coder", "architect", "reviewer", "fast"]
             child = genome.mutate(model_role=self.rng.choice(choices))
+        elif op == "max_tokens":
+            # Longer budgets let deliverable roles (advisor) finish structured,
+            # specific reports the rubric rewards; bounded so cost stays sane.
+            delta = self.rng.choice([-512, 512, 1024])
+            child = genome.mutate(max_tokens=min(8192, max(512, genome.max_tokens + delta)))
+        elif op == "param":
+            child = self._mutate_param(genome)
         else:  # directive: append an improvement to the charter (never twice —
             # repeated grafts would just bloat the prompt / game keyword scoring)
             fresh = [d for d in self.directive_pool if d not in genome.system_prompt]
@@ -126,6 +147,23 @@ class EvolutionEngine:
                 child = genome.mutate(temperature=min(0.95, round(genome.temperature + 0.05, 2)))
         child.lineage = list(genome.lineage) + [_genome_id(genome)]
         return child
+
+    def _mutate_param(self, genome: Genome) -> Genome:
+        """Perturb the continuous genes. An unparameterized genome is first seeded
+        from the role's whole param space (jittered defaults) so evolution gains
+        every dimension at once; thereafter one dimension is nudged within bounds."""
+        params = dict(genome.params)
+        if not params:
+            for name, (lo, hi, default) in self.param_space.items():
+                jitter = self.rng.uniform(-0.1, 0.1) * (hi - lo)
+                params[name] = round(min(hi, max(lo, default + jitter)), 4)
+        else:
+            name = self.rng.choice(list(params))
+            lo, hi, _ = self.param_space.get(
+                name, (params[name] * 0.5, params[name] * 1.5 or 1.0, params[name]))
+            step = self.rng.uniform(-0.25, 0.25) * (hi - lo)
+            params[name] = round(min(hi, max(lo, params[name] + step)), 4)
+        return genome.mutate(params=params)
 
     def _constitutional(self, genome: Genome) -> bool:
         """Reject mutations that try to weaken governance."""
@@ -263,4 +301,5 @@ def _serialize(genome: Genome) -> dict:
         "max_tokens": genome.max_tokens,
         "tools": list(genome.tools),
         "lineage": list(genome.lineage),
+        "params": dict(genome.params),
     }

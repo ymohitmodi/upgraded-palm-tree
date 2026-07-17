@@ -196,12 +196,18 @@ def multiyear_financials(ticker: str, *, identity: str = "",
         return ""
 
 
+_COMPANY_FOCUS = ("this company's durable competitive moat and how it is widening or "
+                  "narrowing versus competitors, the quality and trend of its "
+                  "owner-earnings, balance-sheet and footnote risks, management's "
+                  "capital allocation, and whether it can compound for years")
+
+
 def ingest_full_10k(memory, ticker: str, *, identity: str = "",
                     config=None, provider=None):  # pragma: no cover - live only
-    """Read a company's ENTIRE latest 10-K into memory via the long-document engine
-    (chunk → fold → embed) so nothing is truncated, appended with a multi-year
-    statement trend. Returns the digest or None."""
-    from ...context import digest_to_memory
+    """Read a company's ENTIRE latest 10-K (plus a multi-year statement trend) and
+    INTERPRET it — extracting moat/risk/quality insights, not just a synthesis dump.
+    Returns the digest or None."""
+    from ...context import read_and_learn
 
     text = read_full_10k(ticker, identity=identity)
     if len(text) < 500:
@@ -209,31 +215,32 @@ def ingest_full_10k(memory, ticker: str, *, identity: str = "",
     trend = multiyear_financials(ticker, identity=identity)
     if trend:
         text = f"{trend}\n\n{text}"
-    return digest_to_memory(
+    focus = f"{ticker} — {_COMPANY_FOCUS}"
+    digest, _, _ = read_and_learn(
         memory, text, source=f"10-K:{ticker}",
         tags=["sec", ticker.lower(), "10-k", "full-read", "footnotes", "multi-year"],
-        config=config, provider=provider,
-    )
+        focus=focus, config=config, provider=provider, doctrine=False, max_lessons=6)
+    return digest
 
 
 def ingest_company_filings(memory, toolbox, ticker: str, *,
                            config=None, provider=None):  # pragma: no cover - live only
-    """Read one company's filings end-to-end into long-term research memory.
+    """Read one company's filings and INTERPRET them into moat/risk/quality insights
+    (untrusted, company-specific), not a raw synthesis.
 
-    Returns the :class:`DocumentDigest` (whose chunks stay embedded for detail
-    lookups) or ``None`` when nothing could be read. Pass ``config``/``provider``
-    to distill with the live model; omit them for the free, deterministic
-    extractive fold (every chunk is still read and indexed either way)."""
-    from ...context import digest_to_memory
+    Returns the :class:`DocumentDigest` (chunks stay embedded for detail lookups)
+    or ``None``. Pass ``config``/``provider`` for live interpretation; omit for the
+    free deterministic fold (every chunk still read + indexed either way)."""
+    from ...context import read_and_learn
 
     read = fetch_company_filings(toolbox, ticker)
     if not read.ok:
         return None
-    digest = digest_to_memory(
+    digest, _, _ = read_and_learn(
         memory, read.text, source=f"sec-filings:{ticker}",
         tags=["sec", ticker.lower(), "filings", "deep-read", "footnotes"],
-        config=config, provider=provider,
-    )
+        focus=f"{ticker} — {_COMPANY_FOCUS}", config=config, provider=provider,
+        doctrine=False, max_lessons=5)
     return digest
 
 

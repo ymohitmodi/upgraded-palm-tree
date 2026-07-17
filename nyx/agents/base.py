@@ -109,11 +109,18 @@ class Genome:
     max_tokens: int = 2048
     tools: list[str] = field(default_factory=list)
     lineage: list[str] = field(default_factory=list)  # ancestor genome ids
+    # Continuous "genes": named numeric hyperparameters a capability's benchmark
+    # reads (e.g. the value analyst's factor weights + risk/portfolio knobs). An
+    # empty dict means "not parameterized" — legacy genomes and prompt-only roles
+    # are unaffected, so this widens the search space without any regression.
+    params: dict[str, float] = field(default_factory=dict)
 
     def mutate(self, **changes) -> "Genome":
         child = replace(self, **changes)
         child.tools = list(self.tools)
         child.lineage = list(self.lineage)
+        if "params" not in changes:      # deep-copy so a child never aliases its parent
+            child.params = dict(self.params)
         return child
 
 

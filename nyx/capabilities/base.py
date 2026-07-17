@@ -80,6 +80,11 @@ class Capability(ABC):
         """Domain directive pool for mutation (None = software default)."""
         return None
 
+    def param_space(self) -> dict | None:
+        """Continuous gene space {name: (lo, hi, default)} for a role whose fitness
+        reads numeric hyperparameters. None/empty = a prompt-only genome."""
+        return None
+
     def allowed_tools(self) -> set[str] | None:
         """Least-privilege tool allowlist for this capability (None = all).
 

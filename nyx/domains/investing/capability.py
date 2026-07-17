@@ -20,7 +20,7 @@ from ..investing.backtest import (
     INVESTING_DIRECTIVES,
     ValueBenchmark,
     composite_rank,
-    llm_factor_weights,
+    weights_for,
 )
 from ..investing.data import today, try_build_current_universe, try_build_universes
 from ..investing.filings import (
@@ -63,7 +63,9 @@ class ValueInvestingCapability(Capability):
                        if t.strip()]
         self.tickers = tickers or env_tickers or DEFAULT_TICKERS
         self._benchmark: ValueBenchmark | None = None
-        self._seeded_letters = False
+        # Letters still to read (recent-first, so a short run gets the most
+        # relevant; a long run works through all 45). Lazily filled on first cycle.
+        self._letters_todo: list[int] | None = None
         self._seeded_13f = False
         self._discovered = False
         self._digests: dict = {}      # ticker -> DocumentDigest of its full filings
@@ -95,6 +97,21 @@ class ValueInvestingCapability(Capability):
 
     def directives(self):
         return INVESTING_DIRECTIVES
+
+    def param_space(self) -> dict:
+        """The analyst's continuous genes — what evolution tunes against the
+        walk-forward backtest. Four factor weights PLUS the portfolio-construction
+        knobs a real value investor sets: risk aversion, concentration, and a
+        margin-of-safety floor. This is the search space that breaks the plateau."""
+        return {
+            "w_mos": (0.0, 3.0, 1.5),          # emphasis on discount to intrinsic value
+            "w_roic": (0.0, 3.0, 1.0),         # emphasis on quality / moat
+            "w_debt": (0.0, 3.0, 1.0),         # aversion to leverage
+            "w_oey": (0.0, 3.0, 1.0),          # emphasis on owner-earnings yield
+            "downside_lambda": (0.5, 4.0, 2.0),  # how hard to punish capital loss
+            "top_n": (3.0, 15.0, 8.0),         # portfolio concentration
+            "mos_floor": (-0.5, 0.4, -0.5),    # minimum margin of safety to hold
+        }
 
     def constitution(self, base: Constitution) -> Constitution:
         return investing_constitution(mode=base.mode)
@@ -170,23 +187,34 @@ class ValueInvestingCapability(Capability):
                              allowed_domains=ctx.config.allowed_domains,
                              rate_limit_seconds=ctx.config.web_rate_limit_seconds)
         # ALL Berkshire letters (1977→present), read end-to-end into memory once
-        # (cached, so reruns are cheap). NYX_BUFFETT_LETTERS_FROM overrides the
-        # start year; the whole run is the analyst's evolving doctrine corpus.
-        if not self._seeded_letters:
+        # (cached, so reruns are cheap). A BATCH of letters is read each cycle —
+        # recent-first — so a short run learns the most relevant and a long
+        # `--keep-going` run works through all 45, each distilled into durable
+        # Buffett doctrine. NYX_BUFFETT_LETTERS_FROM sets the oldest year read.
+        if self._letters_todo is None:
             try:
                 start = int(os.environ.get("NYX_BUFFETT_LETTERS_FROM", "1977"))
             except ValueError:
                 start = 1977
             from datetime import datetime, timezone
             end = datetime.now(tz=timezone.utc).year - 1
-            res = buffett.fetch_letters(fetcher, ctx.memory, start=start, end=end,
+            self._letters_todo = list(range(end, start - 1, -1))   # recent-first
+        if self._letters_todo:
+            try:
+                batch_size = max(1, int(os.environ.get("NYX_BUFFETT_LETTERS_PER_CYCLE", "4")))
+            except ValueError:
+                batch_size = 4
+            batch, self._letters_todo = (self._letters_todo[:batch_size],
+                                         self._letters_todo[batch_size:])
+            res = buffett.fetch_letters(fetcher, ctx.memory, years=batch,
                                         config=ctx.config, provider=ctx.provider)
             stats["letters"] = res.get("fetched", 0)
+            stats["principles"] = res.get("principles", 0)
             stats["live"] = stats["live"] or res["fetched"] > 0
-            self._seeded_letters = True
             ctx.ledger.append("value-investing", "buffett_letters",
                               rationale=f"read {res.get('fetched', 0)} letters "
-                                        f"({start}-{end}), {res.get('skipped', 0)} skipped",
+                                        f"{batch}, formed {res.get('principles', 0)} "
+                                        f"principles, {len(self._letters_todo)} remaining",
                               decision="INFO")
 
         ticker = self.tickers[ctx.cycle_index % len(self.tickers)]
@@ -349,7 +377,9 @@ class ValueInvestingCapability(Capability):
                               decision="BLOCK")
             return []
         genome = ctx.genomes.get("analyst")
-        weights = llm_factor_weights(genome, ctx.config, ctx.provider, metrics=ctx.metrics)
+        # The SAME evolved doctrine (params → LLM → keywords) that won the backtest
+        # ranks today's names, so training transfers to the live shortlist.
+        weights = weights_for(genome, ctx.config, ctx.provider, metrics=ctx.metrics)
         ranked = composite_rank(universe, weights)
 
         # Stage 3 — deep-read only the finalists (full 10-K + filings), then judge them.

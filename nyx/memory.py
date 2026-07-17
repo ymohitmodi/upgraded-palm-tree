@@ -138,6 +138,34 @@ class MemoryStore:
         self._flush()
         return self.lessons[lid]
 
+    def learn_principle(self, text: str, *, tags: list[str] | None = None, source: str = "",
+                        weight: float = 1.8, threshold: float = 0.86) -> tuple[Lesson, bool]:
+        """Form durable doctrine from an authoritative, injection-screened insight
+        — the way a careful reader adds to permanent notes.
+
+        Dedup-aware: if a near-identical long-term principle already exists, REINFORCE
+        it (a lesson repeated across decades of letters should get *stronger*, not
+        duplicated); otherwise admit a new long-term principle. Returns (lesson,
+        is_new). Unlike :meth:`remember`, this promotes straight to long-term — so
+        reading the primary sources actually accumulates wisdom instead of decaying."""
+        text = text.strip()
+        if len(text) < 20:
+            return self.remember(text, kind="principle", tags=tags, source=source), False
+        for lesson, rel, _ in self.recall_scored(text, k=3, kind="principle", touch=False):
+            if rel >= threshold and lesson.tier == "long_term":
+                lesson.weight = round(lesson.weight + 0.6, 3)
+                lesson.uses += 1
+                lesson.last_used = time.time()
+                if tags:
+                    lesson.tags = sorted(set(lesson.tags) | set(tags))
+                self._flush()
+                return lesson, False
+        lesson = self.remember(text, kind="principle", tags=tags, source=source,
+                               weight=weight, trusted=True)
+        lesson.tier = "long_term"     # authoritative doctrine is durable from the start
+        self._flush()
+        return lesson, True
+
     def recall(self, query: str, k: int = 5, kind: str | None = None) -> list[Lesson]:
         """Return the k most relevant lessons for a query.
 
@@ -225,6 +253,10 @@ class MemoryStore:
 
     # -- consolidation ("sleep"): form long-term memory ---------------------
     _GENERIC_TAGS = {"core", "flow", "page", "data", "model", "errors"}
+    # Only these kinds are wisdom that can be abstracted into durable doctrine.
+    # Bookkeeping kinds (track-record, meta) and raw research digests are recalled
+    # for context but never elevated to a governing principle.
+    _DOCTRINE_KINDS = {"principle", "lesson", "insight", "pattern"}
 
     def consolidate(
         self,
@@ -258,11 +290,15 @@ class MemoryStore:
                 decayed += 1
 
         # 2. Abstract recurring themes (shared, non-generic tag) into principles.
-        #    ONLY trusted lessons form doctrine — untrusted external content can
-        #    never become a governing long-term principle (anti-poisoning).
+        #    ONLY trusted, doctrine-bearing lessons form principles — untrusted
+        #    external content can't (anti-poisoning), and neither can bookkeeping
+        #    (track-record/screen logs), which were polluting doctrine with lines
+        #    like "top picks today: TCOM, ATAT" masquerading as a principle.
         theme_members: dict[str, list[Lesson]] = {}
         for lesson in self.lessons.values():
             if lesson.tier == "long_term" or not lesson.trusted:
+                continue
+            if lesson.kind not in self._DOCTRINE_KINDS:
                 continue
             for tag in lesson.tags:
                 t = tag.lower()

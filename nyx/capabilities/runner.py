@@ -246,7 +246,7 @@ class CapabilityRunner:
             config=self.config, provider=self.provider, constitution=self.constitution,
             archive=self.archive, ledger=self.ledger, role=self.cap.evolve_role(),
             benchmark=self.cap.benchmark(self._ctx()), directive_pool=self.cap.directives(),
-            metrics=self.metrics,
+            param_space=self.cap.param_space(), metrics=self.metrics,
         )
         engine.evolve(generations=generations)
         best = self.archive.best_for(self.cap.evolve_role())

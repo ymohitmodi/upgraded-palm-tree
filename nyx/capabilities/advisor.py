@@ -309,11 +309,14 @@ class AdvisorCapability(Capability):
             dossier_path = self._write_dossier(ctx, task, text, filename=dossier_name)
             ctx.ledger.append("advisor", "dossier_write",
                               rationale=str(dossier_path), decision="INFO")
+        # A bookkeeping record of the cycle (kind=track-record), so it is recalled
+        # for context but never abstracted into governing doctrine — the analyst's
+        # real learning comes from the grounded arXiv/news research it read.
         lessons = [(f"Advisor deliverable for '{task[:60]}' "
                     f"{'passed' if verdict.passed else 'was blocked by'} gates "
                     f"(rubric {score:.2f})"
                     + (f"; dossier: {dossier_path.name}" if dossier_path else "") + ".",
-                    "lesson", ["advisor"] + sorted(task.lower().split()[:3]))]
+                    "track-record", ["advisor"] + sorted(task.lower().split()[:3]))]
         return CycleResult(
             item=task, ok=verdict.passed, summary=text, score=score,
             blocked_at=None if verdict.passed else verdict.gate,

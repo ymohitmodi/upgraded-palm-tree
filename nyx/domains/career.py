@@ -72,6 +72,12 @@ ADVISOR_DIRECTIVES = [
     "Never fabricate credentials, citations, or metrics; flag every assumption explicitly.",
     "List the top risks with a mitigation each; kill weak claims before a critic does.",
     "Structure output with headed sections and bullet lists so evidence is auditable.",
+    "Name specific target venues, committees, or programs — never generic categories.",
+    "Compare the candidate against the bar reviewers actually apply; state where they fall short.",
+    "Sequence actions by leverage: highest-impact, lowest-effort evidence first.",
+    "Cite the exact standard or criterion text the evidence must satisfy.",
+    "Give each artifact a definition of done — what makes it submission-ready.",
+    "Prefer primary sources (official pages, filings, the paper itself) over commentary.",
 ]
 
 _GROUNDING_RE = re.compile(r"https?://|arxiv\.org|doi\.org|\bsource\s*:", re.IGNORECASE)

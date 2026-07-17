@@ -68,41 +68,45 @@ def letter_urls(start: int = 1977, end: int = 2024) -> list[tuple[int, str]]:
     return urls
 
 
-def fetch_letters(fetcher, memory, *, start: int = 1977, end: int = 2024, excerpt: int = 800,
-                  config=None, provider=None) -> dict:
-    """Live: fetch shareholder letters and store them as long-term memories.
+_LETTER_FOCUS = ("what makes a business wonderful (moats, pricing power, returns on "
+                 "capital), how to judge management and capital allocation, valuation "
+                 "and owner-earnings, temperament, and the mistakes to avoid")
 
-    Reads the **entire** run of letters (1977→``end`` by default). PDFs (years
-    ≥ 1998) are extracted to real text by the fetcher's pypdf path, so the whole
-    letter is prose, not mojibake. When ``config``/``provider`` are supplied each
-    letter is read end-to-end through the long-document engine (chunk → fold →
-    embed, nothing truncated), so the analyst absorbs the full argument, not an
-    800-char excerpt. Returns {fetched, skipped}.
+
+def fetch_letters(fetcher, memory, *, years: list[int] | None = None,
+                  start: int = 1977, end: int = 2024, config=None, provider=None,
+                  max_lessons: int = 5) -> dict:
+    """Read Berkshire letters the way a student of Buffett would: the WHOLE letter,
+    then distilled into durable investing PRINCIPLES — not a stored excerpt or a
+    figures dump.
+
+    Each letter is an authoritative primary source, so its injection-screened
+    lessons become long-term doctrine (deduped/reinforced across decades) via
+    :func:`nyx.context.read_and_learn`. ``years`` reads a specific batch — so a long
+    run can work through all 45 letters without blowing one cycle's budget; omit it
+    to read the whole ``start..end`` range. Returns {fetched, skipped, principles}.
     """
-    from ...context import digest_to_memory
+    from ...context import read_and_learn
 
-    fetched = skipped = 0
-    for year, url in letter_urls(start, end):
+    todo = [(y, u) for y, u in letter_urls(start, end)
+            if years is None or y in set(years)]
+    fetched = skipped = principles = 0
+    for year, url in todo:
         try:
             doc = fetcher.fetch(url)
-            body = doc.text.lstrip()
-            if (not (200 <= doc.status < 300) or len(body) < 200
+            body = (doc.text or "").lstrip()
+            if (not (200 <= doc.status < 300) or len(body) < 400
                     or body.startswith("%PDF")
                     or doc.text.count("�") > max(20, len(doc.text) // 20)):
                 skipped += 1
                 continue
-            if config is not None:
-                # Full-letter read: the whole argument, folded and embedded.
-                digest_to_memory(memory, doc.text, source=url,
-                                 tags=["buffett", "letter", str(year), "full-read"],
-                                 config=config, provider=provider)
-            else:
-                memory.remember(
-                    f"Berkshire {year} shareholder letter (source: {url}): {doc.text[:excerpt]}",
-                    kind="research", tags=["buffett", "letter", str(year)],
-                    source=url, weight=1.5, trusted=False)  # untrusted primary source
+            _, _, new_principles = read_and_learn(
+                memory, doc.text, source=f"Berkshire {year} letter ({url})",
+                tags=["buffett", "letter", str(year)], focus=_LETTER_FOCUS,
+                config=config, provider=provider, doctrine=True, max_lessons=max_lessons)
+            principles += new_principles
             fetched += 1
         except Exception:  # noqa: BLE001 — best effort; never stall the loop
             skipped += 1
     memory._flush()
-    return {"fetched": fetched, "skipped": skipped}
+    return {"fetched": fetched, "skipped": skipped, "principles": principles}
