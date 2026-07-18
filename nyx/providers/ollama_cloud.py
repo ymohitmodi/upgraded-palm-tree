@@ -154,16 +154,29 @@ class OllamaCloudProvider:
     _CHAT_TIMEOUT = (10, 180)
     _EMBED_TIMEOUT = (10, 60)
 
+<<<<<<< HEAD
     # Transient-failure policy: an unattended multi-hour run WILL hit dropped
     # connections, timeouts, and 429/5xx blips; each must cost seconds, not the
     # mission. Deliberate interrupts (Ctrl+C) are BaseException and always pass.
     _RETRIES = 3
     _BACKOFF = 2.0   # seconds; grows 2s, 8s
 
+=======
+>>>>>>> 3e77a8dfc9fe452b0e527b7fa2cf66034062550d
     def _post(self, payload: dict) -> dict:
         body = json.dumps(payload).encode("utf-8")
         try:
             import requests  # type: ignore
+<<<<<<< HEAD
+=======
+
+            resp = requests.post(
+                self.endpoint, headers=self._headers(), data=body, timeout=self._CHAT_TIMEOUT
+            )
+            if resp.status_code >= 400:
+                raise ProviderError(f"HTTP {resp.status_code}: {resp.text[:500]}")
+            return resp.json()
+>>>>>>> 3e77a8dfc9fe452b0e527b7fa2cf66034062550d
         except ImportError:
             return self._post_stdlib(body)
 
