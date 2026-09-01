@@ -45,3 +45,12 @@ addopts = "-q"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
+# Pin the ruleset to ruff's long-standing default (pycodestyle E4/E7/E9 +
+# pyflakes F) that this codebase was written and reviewed against. CI installs a
+# floating `ruff>=0.5`, and newer ruff releases (0.16+) ship a much larger
+# default set — without this explicit select, CI lint results drift with every
+# ruff release. Making the select explicit keeps the lint contract deterministic
+# and version-independent.
+select = ["E4", "E7", "E9", "F"]
