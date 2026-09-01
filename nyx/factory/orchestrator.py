@@ -43,6 +43,8 @@ class FactoryResult:
     held_for_approval: bool = False
     metrics: dict = field(default_factory=dict)
     ledger_ok: bool = True
+    findings: list[str] = field(default_factory=list)
+    lessons_applied: int = 0
 
     def artifact(self, stage: str) -> str | None:
         for s in self.stages:
@@ -84,6 +86,8 @@ class Factory:
         constitution: Constitution | None = None,
         ledger: AuditLedger | None = None,
         metrics: Metrics | None = None,
+        genomes: dict | None = None,
+        memory=None,
     ):
         self.config = config or load_config()
         self.provider = provider or build_provider(self.config)
@@ -92,25 +96,80 @@ class Factory:
         )
         self.ledger = ledger or AuditLedger(self.config.ledger_path)
         self.metrics = metrics or Metrics()
+        # Evolved genomes adopted per role (from the evolution archive). When a
+        # role has an adopted genome, agents run with that improved DNA.
+        self.genomes: dict = genomes or {}
+        # Semantic memory (lessons). Recalled per build and reflected on after.
+        self.memory = memory
+        self._recalled: list[str] = []
 
     # -- agent factory -------------------------------------------------------
     def _agent(self, role: str) -> Agent:
-        return build_agent(
+        agent = build_agent(
             role,
             self.config,
             self.provider,
             self.constitution,
             ledger=self.ledger,
             metrics=self.metrics,
+            genome=self.genomes.get(role),
         )
+        agent.lessons = self._recalled  # apply what we've learned
+        return agent
+
+    def _compact_context(self, text: str) -> str:
+        """Bound the working context carried between stages (short-term memory).
+
+        Like human working memory, capacity is limited: when the running context
+        exceeds the budget, keep the head and tail plus salient lines (decisions,
+        gates, signatures, requirements) and elide the rest. Cheap, deterministic,
+        and offline — no extra model call.
+        """
+        budget = self.config.context_char_budget
+        if budget <= 0 or len(text) <= budget:
+            return text
+        # Cut on line boundaries so code fences and sentences survive intact.
+        head = text[: budget // 2]
+        head = head[: head.rfind("\n")] if "\n" in head else head
+        tail = text[-(budget // 4):]
+        tail = tail[tail.find("\n") + 1:] if "\n" in tail else tail
+
+        salient_kw = ("must", "gate", "block", "valid", "def ", "class ", "error",
+                      "security", "requirement", "accept", "test")
+        middle = text[len(head): len(text) - len(tail)]
+        salient = [ln for ln in middle.splitlines()  # only lines the cut would lose
+                   if any(k in ln.lower() for k in salient_kw)]
+        keep = "\n".join(salient)[: budget // 4]
+        compacted = f"{head}\n…[context compacted]…\n{keep}\n…\n{tail}"
+        return compacted[:budget]  # never exceed the stated working-memory budget
 
     # -- run -----------------------------------------------------------------
     def build(self, intent: str, approver: Approver | None = None) -> FactoryResult:
         """Run the full pipeline for a feature/product intent."""
+        audit_start_seq = self.ledger.next_seq()   # to prove this run wrote to the ledger
         self.ledger.append("factory", "run_start", rationale=intent, decision="INFO")
         result = FactoryResult(intent=intent)
         claims: dict[str, bool] = {}
         context = ""
+
+        # Discover + assemble the lean, relevant context for this intent (the
+        # broker multi-probes, floors on relevance, dedups, and budgets).
+        if self.memory is not None:
+            from ..context_broker import ContextBroker
+
+            bundle = ContextBroker(
+                budget_chars=max(800, self.config.context_char_budget // 2)).assemble(
+                intent, self.memory)
+            self._recalled = bundle.lessons
+            result.lessons_applied = len(self._recalled)
+            if self._recalled:
+                self.ledger.append(
+                    "memory", "recall",
+                    rationale=f"{len(self._recalled)} lessons ({bundle.dropped} dropped) "
+                              f"for: {intent[:50]}",
+                    decision="INFO",
+                )
+
         judge = self._agent("reviewer")
 
         for stage, role, use_fanout in _PIPELINE:
@@ -138,6 +197,72 @@ class Factory:
                 primary = self._merge(primary, sec)
 
             claims.update(primary.claims)
+
+            # Every gate is verified against the artifact/ledger, not the agent's
+            # self-report. Scanners/checks can only VETO (fail-closed).
+            if stage == "design":
+                from .verify import verify_spec
+
+                sv = verify_spec(primary.text)
+                claims["has_spec"] = bool(claims.get("has_spec", False)) and sv.ok
+                result.findings.extend(sv.findings)
+                self.ledger.append("factory", "verify_spec",
+                                   rationale=("ok" if sv.ok else "; ".join(sv.findings))[:100],
+                                   decision="PASS" if sv.ok else "BLOCK")
+
+            if stage == "deploy":
+                from .verify import verify_deploy
+
+                dv = verify_deploy(primary.text)
+                claims["deploy_reversible"] = bool(claims.get("deploy_reversible", False)) and dv.ok
+                result.findings.extend(dv.findings)
+                self.ledger.append("factory", "verify_deploy",
+                                   rationale=("ok" if dv.ok else "; ".join(dv.findings))[:100],
+                                   decision="PASS" if dv.ok else "BLOCK")
+
+            if stage == "operate":
+                from .verify import verify_audit
+
+                av = verify_audit(self.ledger, self.ledger.next_seq() - audit_start_seq)
+                claims["audited"] = bool(claims.get("audited", False)) and av.ok
+                result.findings.extend(av.findings)
+                self.ledger.append("factory", "verify_audit",
+                                   rationale=("ok" if av.ok else "; ".join(av.findings))[:100],
+                                   decision="PASS" if av.ok else "BLOCK")
+
+            # Don't trust the security agent's self-graded SECURITY_OK: SCAN the
+            # actual build code (secrets, injection, dangerous constructs) and let
+            # the scanners VETO the gate (fail-closed) regardless of the claim.
+            if stage == "review":
+                from .verify import verify_security
+
+                build_art = next((s.artifact for s in result.stages if s.stage == "build"),
+                                 primary.text)
+                sv = verify_security(build_art)
+                claims["security_ok"] = bool(claims.get("security_ok", False)) and sv.ok
+                result.findings.extend(sv.findings)
+                self.ledger.append(
+                    "factory", "verify_security",
+                    rationale=("clean" if sv.ok else "; ".join(sv.findings))[:100],
+                    decision="PASS" if sv.ok else "BLOCK",
+                    data={"scanned": True, "findings": sv.findings},
+                )
+
+            # Don't trust the tester's self-graded TESTS_PASS: actually EXECUTE
+            # the build's code against the tester's tests in the sandbox and set
+            # the claim from reality (fail-closed on a real failure).
+            if stage == "test":
+                from .verify import verify_artifact
+
+                build_art = next((s.artifact for s in result.stages if s.stage == "build"), "")
+                vr = verify_artifact(build_art, primary.text)
+                if vr.ran:
+                    claims["tests_pass"] = vr.passed
+                self.ledger.append(
+                    "factory", "verify_tests", rationale=vr.detail[:100],
+                    decision=("PASS" if vr.passed else "BLOCK") if vr.ran else "INFO",
+                    data={"ran": vr.ran, "passed": vr.passed, "verified": vr.ran},
+                )
 
             # Special handling: deploy is gated to autonomy + approval.
             if stage == "deploy":
@@ -167,8 +292,10 @@ class Factory:
                 )
             )
 
-            # Carry the winning artifact forward as context for the next stage.
-            context = primary.text
+            result.findings.extend(primary.findings)
+
+            # Carry the winning artifact forward as bounded working memory.
+            context = self._compact_context(primary.text)
 
             if not verdict.passed and self.constitution.mode == "block":
                 result.blocked_at = stage
@@ -184,6 +311,18 @@ class Factory:
             and any(s.stage == "operate" and s.passed for s in result.stages)
         )
         result.metrics = self.metrics.summary()
+
+        # Reflect: distill durable lessons from this run into semantic memory.
+        if self.memory is not None:
+            from ..memory import reflect_on_run
+
+            learned = reflect_on_run(result, self.memory)
+            if learned:
+                self.ledger.append(
+                    "memory", "reflect", rationale=f"{len(learned)} lessons learned",
+                    decision="INFO",
+                )
+
         result.ledger_ok = self.ledger.verify()
         self.ledger.append(
             "factory",

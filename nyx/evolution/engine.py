@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import random
-import time
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -53,7 +52,11 @@ class EvolutionReport:
 
 
 def _genome_id(genome: Genome) -> str:
-    blob = f"{genome.role}|{genome.system_prompt}|{genome.temperature}|{genome.model_role}"
+    # Params are part of the identity: a param-only mutation is a distinct genome
+    # and must get its own archive id (else it collides with its parent).
+    param_blob = ";".join(f"{k}={round(v, 4)}" for k, v in sorted(genome.params.items()))
+    blob = (f"{genome.role}|{genome.system_prompt}|{genome.temperature}|"
+            f"{genome.model_role}|{genome.max_tokens}|{param_blob}")
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
 
 
@@ -68,18 +71,29 @@ class EvolutionEngine:
         role: str = "coder",
         benchmark: Benchmark | None = None,
         seed: int = 1234,
+        metrics: Metrics | None = None,
+        directive_pool: list[str] | None = None,
+        param_space: dict | None = None,
     ):
         self.config = config or load_config()
         self.provider = provider or build_provider(self.config)
         self.constitution = constitution or Constitution.load(
             self.config.constitution_path, mode=self.config.constitution_mode
         )
-        self.archive = archive or Archive(self.config.evolution_archive)
+        # NB: Archive defines __len__, so an empty one is falsy; use `is None`.
+        self.archive = archive if archive is not None else Archive(self.config.evolution_archive)
         self.ledger = ledger or AuditLedger(self.config.ledger_path)
         self.role = role
         self.benchmark = benchmark or self._default_benchmark
+        # The pool of charter directives mutation can graft on (domain-tunable).
+        self.directive_pool = directive_pool or _DIRECTIVE_POOL
+        # Continuous gene space {name: (lo, hi, default)} for roles whose fitness
+        # reads numeric params (e.g. the value analyst). Empty = prompt-only role.
+        self.param_space = dict(param_space or {})
         self.rng = random.Random(seed)
-        self.metrics = Metrics()
+        # Shared metrics let a caller (e.g. a mission) account benchmark calls
+        # against one budget; otherwise the engine keeps its own counter.
+        self.metrics = metrics if metrics is not None else Metrics()
 
     # -- agent construction --------------------------------------------------
     def _agent_for(self, genome: Genome) -> Agent:
@@ -95,18 +109,19 @@ class EvolutionEngine:
         return agent
 
     def _seed_genome(self) -> Genome:
-        """A deliberately *naive* baseline so evolution has headroom to climb
-        toward the engineering doctrine (realistic: agents start weak)."""
-        return Genome(
-            role=self.role,
-            system_prompt=f"You are a {self.role}. Do the task.",
-            model_role=self.role if self.role in ("coder", "reviewer", "architect") else "fast",
-            temperature=0.7,
-        )
+        """Seed from the role's *production* charter so evolution searches for
+        improvements above the baseline and adopted genomes never regress."""
+        return build_agent(self.role, self.config, self.provider, self.constitution).genome
 
     # -- mutation ------------------------------------------------------------
     def mutate(self, genome: Genome) -> Genome:
-        op = self.rng.choice(["temperature", "directive", "model_role", "directive"])
+        ops = ["temperature", "directive", "model_role", "directive", "max_tokens"]
+        # Bias toward the continuous genes when the role has them — that is where a
+        # quantitative fitness (the value backtest) actually moves, so spending
+        # mutations there is what breaks the 4-weight plateau.
+        if self.param_space:
+            ops += ["param", "param", "param"]
+        op = self.rng.choice(ops)
         if op == "temperature":
             delta = self.rng.choice([-0.1, 0.1, 0.15, -0.05])
             new_temp = min(0.95, max(0.0, round(genome.temperature + delta, 2)))
@@ -114,12 +129,41 @@ class EvolutionEngine:
         elif op == "model_role":
             choices = ["coder", "architect", "reviewer", "fast"]
             child = genome.mutate(model_role=self.rng.choice(choices))
-        else:  # directive: append an improvement to the charter
-            directive = self.rng.choice(_DIRECTIVE_POOL)
-            sep = "" if genome.system_prompt.endswith("\n") else "\n"
-            child = genome.mutate(system_prompt=genome.system_prompt + sep + directive)
+        elif op == "max_tokens":
+            # Longer budgets let deliverable roles (advisor) finish structured,
+            # specific reports the rubric rewards; bounded so cost stays sane.
+            delta = self.rng.choice([-512, 512, 1024])
+            child = genome.mutate(max_tokens=min(8192, max(512, genome.max_tokens + delta)))
+        elif op == "param":
+            child = self._mutate_param(genome)
+        else:  # directive: append an improvement to the charter (never twice —
+            # repeated grafts would just bloat the prompt / game keyword scoring)
+            fresh = [d for d in self.directive_pool if d not in genome.system_prompt]
+            if fresh:
+                directive = self.rng.choice(fresh)
+                sep = "" if genome.system_prompt.endswith("\n") else "\n"
+                child = genome.mutate(system_prompt=genome.system_prompt + sep + directive)
+            else:  # pool exhausted: fall back to a parameter tweak
+                child = genome.mutate(temperature=min(0.95, round(genome.temperature + 0.05, 2)))
         child.lineage = list(genome.lineage) + [_genome_id(genome)]
         return child
+
+    def _mutate_param(self, genome: Genome) -> Genome:
+        """Perturb the continuous genes. An unparameterized genome is first seeded
+        from the role's whole param space (jittered defaults) so evolution gains
+        every dimension at once; thereafter one dimension is nudged within bounds."""
+        params = dict(genome.params)
+        if not params:
+            for name, (lo, hi, default) in self.param_space.items():
+                jitter = self.rng.uniform(-0.1, 0.1) * (hi - lo)
+                params[name] = round(min(hi, max(lo, default + jitter)), 4)
+        else:
+            name = self.rng.choice(list(params))
+            lo, hi, _ = self.param_space.get(
+                name, (params[name] * 0.5, params[name] * 1.5 or 1.0, params[name]))
+            step = self.rng.uniform(-0.25, 0.25) * (hi - lo)
+            params[name] = round(min(hi, max(lo, params[name] + step)), 4)
+        return genome.mutate(params=params)
 
     def _constitutional(self, genome: Genome) -> bool:
         """Reject mutations that try to weaken governance."""
@@ -131,34 +175,21 @@ class EvolutionEngine:
 
     # -- benchmark -----------------------------------------------------------
     def _default_benchmark(self, agent: Agent) -> float:
-        """Reference benchmark: score a genome on a small suite.
-
-        Combines (a) how the produced *artifact* looks and (b) how well the
-        genome's *charter* encodes the engineering doctrine and uses a sensible
-        temperature. Replace this with SWE-bench-style tasks or your product
-        KPIs for a live factory; the admission mechanics are identical.
+        """Default fitness. For the coder role this is **executed** correctness:
+        the agent's code is run against hidden tests in the sandbox (real signal,
+        no keyword theater). Non-executable roles (reviewer, planner, …) fall back
+        to charter/doctrine quality, which is the only signal they have. A small
+        genome-quality term breaks ties without letting keywords dominate.
         """
-        tasks = [
-            "sum a list of numbers safely",
-            "validate and parse a numeric config",
-            "compute a moving average over a window",
-        ]
-        artifact_scores = []
-        for t in tasks:
-            text = agent.run(t).text
-            low = text.lower()
-            s = 0.0
-            s += 0.30 if ("valid" in low or "raise" in low) else 0.0
-            s += 0.25 if "```" in text else 0.0
-            s += 0.20 if "def " in text else 0.0
-            s += 0.15 if not scan_secrets(text) else 0.0
-            s += 0.10 if not self.constitution.check_forbidden(text) else 0.0
-            artifact_scores.append(s)
-        artifact = sum(artifact_scores) / len(artifact_scores)
-        genome = self._genome_quality(agent.genome)
-        # Mock artifacts are constant, so the genome term carries the gradient;
-        # with a real brain the artifact term dominates instead.
-        return round(0.3 * artifact + 0.7 * genome, 4)
+        if self.role == "coder":
+            from .benchmarks import default_swebench_suite
+
+            executed = default_swebench_suite()(agent)          # fraction of tests passing
+            genome = self._genome_quality(agent.genome)
+            return round(0.85 * executed + 0.15 * genome, 4)    # reality dominates
+
+        # Non-coder roles: score the charter's doctrine + sane temperature.
+        return self._genome_quality(agent.genome)
 
     @staticmethod
     def _genome_quality(genome: Genome) -> float:
@@ -172,8 +203,9 @@ class EvolutionEngine:
 
     # -- evolution loop ------------------------------------------------------
     def evolve(self, generations: int = 5) -> EvolutionReport:
-        # Seed the archive with the baseline genome if empty.
-        if len(self.archive) == 0:
+        # Seed when *this role* has no genome yet (not merely when the whole
+        # archive is empty), so evolving a new role on a shared archive works.
+        if self.archive.best_for(self.role) is None:
             seed_genome = self._seed_genome()
             score = self.benchmark(self._agent_for(seed_genome))
             rec = GenomeRecord(
@@ -185,13 +217,16 @@ class EvolutionEngine:
                 note="seed",
             )
             self.archive.add(rec)
-            self.ledger.append("evolution", "seed_archive", rationale=f"score={score}", decision="INFO")
+            self.ledger.append(
+                "evolution", "seed_archive", rationale=f"role={self.role} score={score}", decision="INFO"
+            )
 
-        before = self.archive.best().score
+        before = self.archive.best_for(self.role).score
         admitted = rejected = 0
 
         for gen in range(1, generations + 1):
-            parent = self.archive.select_parent(self.rng)
+            # Role-scoped selection: only mutate this role's lineage.
+            parent = self.archive.select_parent(self.rng, role=self.role)
             child_genome = self.mutate(parent.to_genome())
 
             if not self._constitutional(child_genome):
@@ -231,7 +266,7 @@ class EvolutionEngine:
                     decision="INFO",
                 )
 
-        best = self.archive.best()
+        best = self.archive.best_for(self.role)
         return EvolutionReport(
             generations=generations,
             admitted=admitted,
@@ -266,4 +301,5 @@ def _serialize(genome: Genome) -> dict:
         "max_tokens": genome.max_tokens,
         "tools": list(genome.tools),
         "lineage": list(genome.lineage),
+        "params": dict(genome.params),
     }

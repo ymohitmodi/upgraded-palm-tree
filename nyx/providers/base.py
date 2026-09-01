@@ -23,6 +23,9 @@ class Completion:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     raw: dict = field(default_factory=dict)
+    # Structured tool calls the model requested (native function-calling). Each is
+    # {"name": str, "arguments": dict}. Empty when the model answered in text.
+    tool_calls: list = field(default_factory=list)
 
     @property
     def total_tokens(self) -> int:
@@ -41,5 +44,6 @@ class Provider(Protocol):
         *,
         temperature: float = 0.2,
         max_tokens: int = 2048,
+        tools: list | None = None,   # OpenAI-style tool schemas for function-calling
     ) -> Completion:
         ...

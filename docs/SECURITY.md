@@ -48,6 +48,50 @@ NYX is designed against exactly that class of failure.
 Even at `autonomous`, the **forbidden list** and **immutable core principles**
 are always hard blocks. The factory can be fast; it cannot be ungoverned.
 
+## Hardening for tools, network & memory (OWASP LLM Top 10)
+
+As NYX gained web crawling, MCP servers, and live data, the posture was hardened
+to the OWASP Top 10 for LLM Applications — enforced in code:
+
+| Risk | Defense | Where |
+| --- | --- | --- |
+| **LLM07 Insecure tool design** | **Per-capability least-privilege allowlist** — a capability declares `allowed_tools()` and the runner restricts the toolbox; denied calls are logged `tools/deny:*` | [`tools/registry.py`](../nyx/tools/registry.py), `capabilities/*` |
+| **SSRF / egress** | Scheme allowlist + domain allowlist + **resolution guard** blocking loopback / RFC-1918 / link-local / cloud-metadata (`169.254.169.254`) | [`security/egress.py`](../nyx/security/egress.py), [`tools/web.py`](../nyx/tools/web.py) |
+| **LLM07 (MCP)** | MCP client enforces a call **timeout** (a hung server can't freeze the run) | [`tools/mcp.py`](../nyx/tools/mcp.py) |
+| **Data poisoning** | Ingested PDF/web content is validated (mojibake guard) before becoming memory; transient HTTP errors are never cached | [`tools/web.py`](../nyx/tools/web.py) |
+| **Reward hacking** | Evolution can't game the fitness signal by keyword-stuffing (capped weights, no duplicate directive grafts) | [`domains/investing/backtest.py`](../nyx/domains/investing/backtest.py) |
+
+**Least privilege in practice:** the `advisor` capability may crawl the web but
+holds **no** EDGAR credentials; the `value-investing` capability reads filings
+but cannot reach arbitrary tools. **SSRF guard in practice:** on the live network
+the crawler refuses any host that resolves to an internal or cloud-metadata
+address, the standard defense against a poisoned URL exfiltrating credentials.
+
+### Memory poisoning & output disclosure (added)
+
+- **Memory poisoning (Agentic T1 / LLM04+08).** Every externally-sourced memory
+  (fetched pages, filings, letters, tool output) is stored `trusted=False`,
+  injection-screened first, **capped short-term, down-ranked at recall, and
+  excluded from doctrine consolidation** — so poisoned external text can never
+  become a governing long-term principle. Only curated/internal lessons form
+  doctrine. (`nyx/memory.py`, `nyx/context.py`)
+- **Output disclosure (LLM02 / LLM07).** Agent *output* is scanned: named
+  credential patterns are redacted from the artifact, and verbatim leakage of the
+  system preamble is flagged. (`nyx/agents/base.py:_output_guard`)
+
+### Self-audit
+
+Run **`nyx security-audit`** to see every control mapped to the **OWASP LLM Top
+10 (2025)** and the **OWASP Agentic AI threats**, with live-config checks and an
+honest ENFORCED / PARTIAL / ADVISORY status per control
+([`nyx/security/policy.py`](../nyx/security/policy.py)).
+
+Honest scope: this is defense-in-depth to a strong current standard, not a proof
+of safety. Known PARTIALs today: injection detection is heuristic offline (LLM
+classifier needs a key); embeddings are lexical (real embeddings pending);
+misinformation/goal-manipulation defenses are gate- and constitution-based, not
+exhaustive; only the test gate is execution-verified so far.
+
 ## Responsible use
 
 NYX is built for *authorized* product development and operations. The

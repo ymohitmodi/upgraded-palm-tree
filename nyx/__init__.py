@@ -9,9 +9,11 @@ from __future__ import annotations
 
 __version__ = "0.1.0"
 
+from .capabilities import CapabilityRunner, RunReport, select_for
 from .config import Config, load_config
 from .constitution import Constitution
 from .factory.orchestrator import Factory, FactoryResult
+from .memory import MemoryStore, reflect_on_run
 
 __all__ = [
     "__version__",
@@ -20,4 +22,9 @@ __all__ = [
     "Constitution",
     "Factory",
     "FactoryResult",
+    "CapabilityRunner",
+    "RunReport",
+    "select_for",
+    "MemoryStore",
+    "reflect_on_run",
 ]

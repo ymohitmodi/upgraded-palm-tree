@@ -17,15 +17,26 @@ keywords = ["agents", "dark-factory", "agentic", "ollama", "constitutional-ai", 
 dependencies = []
 
 [project.optional-dependencies]
-http = ["requests>=2.31"]
+# brotli lets requests auto-inflate Brotli-encoded responses (e.g. the older
+# Berkshire shareholder letters, which the server always serves as `br`).
+http = ["requests>=2.31", "brotli>=1.1"]
 yaml = ["PyYAML>=6.0"]
-dev = ["pytest>=8.0", "ruff>=0.5", "PyYAML>=6.0"]
+# Live SEC EDGAR / XBRL access (same engine as the edgartools MCP server).
+# pypdf extracts text from PDF primary sources (e.g. Berkshire shareholder letters).
+investing = ["edgartools[ai]>=2.0", "requests>=2.31", "pypdf>=4.0", "brotli>=1.1"]
+# `requests` is included so the provider's requests-path tests (timeout tuple,
+# reasoning parsing) run under CI's `.[dev]` install without pulling edgartools.
+dev = ["pytest>=8.0", "ruff>=0.5", "PyYAML>=6.0", "requests>=2.31"]
 
 [project.scripts]
 nyx = "nyx.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["nyx*"]
+
+[tool.setuptools.package-data]
+# Ship the skill packs inside the wheel so `pip install` deployments have them.
+nyx = ["skill_packs/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -34,3 +45,12 @@ addopts = "-q"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
+# Pin the ruleset to ruff's long-standing default (pycodestyle E4/E7/E9 +
+# pyflakes F) that this codebase was written and reviewed against. CI installs a
+# floating `ruff>=0.5`, and newer ruff releases (0.16+) ship a much larger
+# default set — without this explicit select, CI lint results drift with every
+# ruff release. Making the select explicit keeps the lint contract deterministic
+# and version-independent.
+select = ["E4", "E7", "E9", "F"]
