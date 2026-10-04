@@ -778,7 +778,21 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _ensure_utf8_output() -> None:
+    """Let the CLI print check marks / symbols even when stdout is redirected on Windows.
+
+    A redirected Windows stream (Task Scheduler, CI, ``> log.txt``) defaults to the legacy
+    code page (cp1252), which cannot encode characters such as \u2713 and \u2717 and would
+    crash the command. Reconfigure to UTF-8; unencodable characters degrade to '?'.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _ensure_utf8_output()
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)
