@@ -2,6 +2,7 @@
 sync with what the code actually reads."""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,8 +22,10 @@ def test_installer_is_executable_and_sane():
     assert '".[http,yaml,investing,dev]"' in body      # full live stack incl. brotli
     assert "nyx preflight" in body and "nyx doctor" in body
     assert "mcp-init --add all" in body                # MCP servers registered on install
-    # executable bit set
-    assert inst.stat().st_mode & 0o111
+    # Executable bit: a POSIX concept. Windows checkouts report 0o666 for every file,
+    # so only assert it where the filesystem can express it (git stores it as 100755).
+    if sys.platform != "win32":
+        assert inst.stat().st_mode & 0o111
 
 
 def test_env_example_documents_live_knobs():
