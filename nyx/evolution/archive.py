@@ -58,31 +58,43 @@ class Archive:
     def best(self) -> GenomeRecord | None:
         return max(self.records, key=lambda r: r.score) if self.records else None
 
-    def select_parent(self, rng) -> GenomeRecord | None:
+    def best_for(self, role: str) -> GenomeRecord | None:
+        """Highest-scoring admitted genome for a given role, if any."""
+        candidates = [r for r in self.records if r.genome.get("role") == role]
+        return max(candidates, key=lambda r: r.score) if candidates else None
+
+    def select_parent(self, rng, role: str | None = None) -> GenomeRecord | None:
         """Pick a parent favoring high score, but with novelty: occasionally
         branch from a less-explored (fewer children) genome to stay open-ended.
+
+        When ``role`` is given, selection is restricted to that role's genomes so
+        evolving one role never mutates another role's lineage.
         """
-        if not self.records:
+        pool = (
+            [r for r in self.records if r.genome.get("role") == role]
+            if role is not None
+            else list(self.records)
+        )
+        if not pool:
             return None
-        child_counts = {r.id: 0 for r in self.records}
-        for r in self.records:
+        child_counts = {r.id: 0 for r in pool}
+        for r in pool:
             if r.parent_id in child_counts:
                 child_counts[r.parent_id] += 1
 
         # Exploration branch: pick a rarely-extended genome.
         if rng.random() < 0.3:
-            least = min(self.records, key=lambda r: child_counts[r.id])
-            return least
+            return min(pool, key=lambda r: child_counts[r.id])
         # Exploitation: weight by score.
-        weights = [max(r.score, 0.01) for r in self.records]
+        weights = [max(r.score, 0.01) for r in pool]
         total = sum(weights)
         pick = rng.random() * total
         acc = 0.0
-        for r, w in zip(self.records, weights):
+        for r, w in zip(pool, weights):
             acc += w
             if pick <= acc:
                 return r
-        return self.records[-1]
+        return pool[-1]
 
     def lineage(self, record_id: str) -> list[GenomeRecord]:
         by_id = {r.id: r for r in self.records}

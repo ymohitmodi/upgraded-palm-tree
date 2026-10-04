@@ -38,3 +38,36 @@ def test_chain_continues_across_instances(tmp_path):
     second.append("b", "two")
     assert second.verify() is True
     assert len(second.read()) == 2
+
+
+def test_concurrent_multi_instance_appends_keep_chain_intact(tmp_path):
+    """Regression: separate instances writing from many threads (the fan-out
+    shape) must not interleave the hash chain or duplicate seqs."""
+    import threading
+
+    path = tmp_path / "l.jsonl"
+    # Distinct instances for the same file — as the runner, orchestrator, and
+    # evolution engine each construct.
+    ledgers = [AuditLedger(path) for _ in range(4)]
+    n_per = 25
+    barrier = threading.Barrier(len(ledgers))
+
+    def worker(lg: AuditLedger, tag: str) -> None:
+        barrier.wait()
+        for i in range(n_per):
+            lg.append(tag, f"act{i}", decision="INFO")
+
+    threads = [threading.Thread(target=worker, args=(lg, f"w{k}"))
+               for k, lg in enumerate(ledgers)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    verifier = AuditLedger(path)
+    entries = verifier.read()
+    assert len(entries) == len(ledgers) * n_per
+    assert verifier.verify() is True
+    # Seqs must be a contiguous 0..N-1 with no duplicates.
+    seqs = sorted(e.seq for e in entries)
+    assert seqs == list(range(len(entries)))
