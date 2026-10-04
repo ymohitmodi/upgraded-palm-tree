@@ -1,0 +1,12 @@
+# NYX — full runtime (batteries included).
+#
+# NYX's core is intentionally DEPENDENCY-FREE: `pip install -e .` runs the whole
+# factory in mock mode with nothing below. These packages enable the live paths:
+#   requests        -> Ollama Cloud provider + web crawling (stdlib fallback exists)
+#   PyYAML          -> parse the constitution from YAML
+#   edgartools[ai]  -> live SEC EDGAR / XBRL for the value-investing capability
+#
+# Install: pip install -r requirements.txt   (or: pip install -e ".[investing]")
+requests>=2.31
+PyYAML>=6.0
+edgartools[ai]>=2.0

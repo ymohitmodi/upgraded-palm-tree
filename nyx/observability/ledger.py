@@ -9,12 +9,30 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 GENESIS = "0" * 64
+
+# One lock per ledger *file* (not per instance), so that multiple AuditLedger
+# instances pointing at the same path — the capability runner, the factory
+# orchestrator, the evolution engine, tool wrappers, all firing from fan-out
+# threads — serialize their appends and never interleave the hash chain.
+_PATH_LOCKS: dict[str, threading.Lock] = {}
+_PATH_LOCKS_GUARD = threading.Lock()
+
+
+def _lock_for(path: Path) -> threading.Lock:
+    key = str(path.resolve())
+    with _PATH_LOCKS_GUARD:
+        lock = _PATH_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _PATH_LOCKS[key] = lock
+        return lock
 
 
 @dataclass
@@ -48,25 +66,46 @@ class AuditLedger:
     def __init__(self, path: str | Path = ".nyx/audit.ledger.jsonl"):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()  # serialize appends across fan-out threads
-        self._last_hash = self._load_last_hash()
-        self._seq = self._load_seq()
+        # Shared per-file lock so concurrent instances/threads can't interleave.
+        self._lock = _lock_for(self.path)
 
-    def _load_last_hash(self) -> str:
-        if not self.path.exists():
-            return GENESIS
-        last = None
-        for line in self.path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                last = line
-        if not last:
-            return GENESIS
-        return json.loads(last)["hash"]
+    def _file_tail(self) -> tuple[str, int]:
+        """Authoritative (prev_hash, next_seq) read from the file itself.
 
-    def _load_seq(self) -> int:
-        if not self.path.exists():
-            return 0
-        return sum(1 for ln in self.path.read_text(encoding="utf-8").splitlines() if ln.strip())
+        Reading the true tail on every append — rather than trusting per-instance
+        in-memory state — is what keeps the chain intact when more than one
+        AuditLedger writes to the same file. Only the last record is needed, so a
+        bounded tail read is used, with a full-read fallback for oversized records.
+        """
+        try:
+            size = self.path.stat().st_size
+        except FileNotFoundError:
+            return GENESIS, 0
+        if size == 0:
+            return GENESIS, 0
+        window = min(size, 65536)
+        with self.path.open("rb") as fh:
+            fh.seek(size - window)
+            chunk = fh.read()
+        lines = [ln for ln in chunk.splitlines() if ln.strip()]
+        # If the window began mid-record (only a partial first line survived) or
+        # the last line won't parse, fall back to reading the whole file.
+        last_obj = None
+        if lines:
+            try:
+                last_obj = json.loads(lines[-1].decode("utf-8"))
+            except ValueError:
+                last_obj = None
+        if last_obj is None or window < size and len(lines) < 2:
+            all_lines = [ln for ln in self.path.read_bytes().splitlines() if ln.strip()]
+            if not all_lines:
+                return GENESIS, 0
+            last_obj = json.loads(all_lines[-1].decode("utf-8"))
+        return last_obj["hash"], int(last_obj["seq"]) + 1
+
+    def next_seq(self) -> int:
+        """Seq the next appended entry will carry (== entry count for an intact chain)."""
+        return self._file_tail()[1]
 
     def append(
         self,
@@ -77,21 +116,22 @@ class AuditLedger:
         data: dict | None = None,
     ) -> LedgerEntry:
         with self._lock:
+            prev_hash, seq = self._file_tail()
             entry = LedgerEntry(
-                seq=self._seq,
+                seq=seq,
                 ts=time.time(),
                 actor=actor,
                 action=action,
                 rationale=rationale,
                 decision=decision,
-                prev_hash=self._last_hash,
+                prev_hash=prev_hash,
                 data=data or {},
             )
             entry.hash = entry.compute_hash()
             with self.path.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(asdict(entry), separators=(",", ":")) + "\n")
-            self._last_hash = entry.hash
-            self._seq += 1
+                fh.flush()
+                os.fsync(fh.fileno())
             return entry
 
     def read(self) -> list[LedgerEntry]:

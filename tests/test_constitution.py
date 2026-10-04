@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from nyx.constitution import Constitution, ConstitutionViolation, load_yaml
+from nyx.constitution import Constitution, ConstitutionViolation
 
 
 def test_loads_real_constitution(constitution_path):

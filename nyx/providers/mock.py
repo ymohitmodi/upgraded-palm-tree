@@ -48,6 +48,13 @@ class MockProvider:
     def __init__(self, config: Config | None = None):
         self.config = config
 
+    def embed(self, model: str, text: str) -> list[float]:
+        """Deterministic offline embedding (exercises the provider-embeddings
+        path without a network); real semantics come from a live provider."""
+        from ..embeddings import HashingEmbedder
+
+        return HashingEmbedder(dim=256).embed(text)
+
     def chat(
         self,
         model: str,
@@ -55,6 +62,7 @@ class MockProvider:
         *,
         temperature: float = 0.2,
         max_tokens: int = 2048,
+        tools: list | None = None,   # accepted for interface parity; mock answers in text
     ) -> Completion:
         role = _role_of(messages)
         topic = _topic_of(messages)
@@ -75,6 +83,15 @@ class MockProvider:
 
 def _render(role: str, topic: str, seed: int, temperature: float) -> str:
     variant = seed % 3
+    if role == "planner":
+        # Deterministic backlog decomposition of the objective.
+        facets = [
+            "core flow", "data model + persistence", "input validation & errors",
+            "observability (logs+metrics)", "tests & acceptance", "polish & docs",
+        ]
+        n = 3 + (seed % 3)  # 3..5 features
+        lines = [f"- {topic}: {facets[i % len(facets)]}" for i in range(n)]
+        return "\n".join(lines)
     if role == "explorer":
         return (
             f"# Opportunity brief: {topic}\n"
@@ -101,6 +118,7 @@ def _render(role: str, topic: str, seed: int, temperature: float) -> str:
         bodies = [
             "    return sum(items)",
             "    total = 0\n    for it in items:\n        total += it\n    return total",
+            "    import functools, operator\n"
             "    return functools.reduce(operator.add, items, 0)",
         ]
         return (
