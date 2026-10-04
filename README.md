@@ -461,7 +461,7 @@ testable, but deliverable quality comes from the live model. Full steps in the
 
 ## Status
 
-NYX is a **runnable reference framework** — **179 tests passing**, `ruff` clean,
+NYX is a **runnable reference framework** — **234 tests passing**, `ruff` clean,
 CI on 3.10–3.12. Functional and tested: the LLM‑routed capability runner, the
 three capabilities, the gated dark‑factory pipeline + fan‑out, agentic tool use,
 the Darwin‑Gödel evolution archive (genomes adopted back in), three‑layer memory

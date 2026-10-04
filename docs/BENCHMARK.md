@@ -19,7 +19,7 @@ against Mythos or humans.
 | Held-out SWE-bench (mock coder) | 0.75 pass | The executed test-gate + eval harness work; the mock coder is constant, so this is **not** a coding-skill measure. |
 | Held-out value backtest — doctrine vs none | doctrine **+0.089 / +14.0%** vs none **−0.315 / −6.8%** (universes never trained on) | Evolution/doctrine encoding **generalizes** to unseen data — the *machinery* is real. **Not** evidence of market alpha: the universe is synthetic with a built-in signal; real markets are adversarial/efficient. |
 | Self-improvement (held-out) | evolved analyst −0.31 → +0.17 (+0.49) | The evolve→adopt→verify loop lifts held-out score — real *generalization*, on toy data. |
-| Engineering | 167 tests, 57 modules, OWASP LLM+Agentic hardened, all 5 gates verified | The system is real and disciplined — a capability *substrate*, not a capability *score*. |
+| Engineering | 234 tests, 62 modules, OWASP LLM+Agentic hardened, all 5 gates verified | The system is real and disciplined — a capability *substrate*, not a capability *score*. |
 
 **Honest caveat:** none of the above proves superiority over anyone. To truly
 benchmark against Mythos/PhDs you need real suites — SWE-bench Verified,
