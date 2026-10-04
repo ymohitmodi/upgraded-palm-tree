@@ -46,3 +46,24 @@ def test_sandbox_runs_and_isolates():
 
     timed = run_sandboxed("while True:\n    pass\n", timeout=1.0)
     assert timed.timed_out
+
+
+# -- sandbox environment (regression: Windows needs SYSTEMROOT to start Python) --
+def test_sandbox_env_is_scrubbed_of_parent_secrets(monkeypatch):
+    from nyx.security.sandbox import sandbox_env
+
+    monkeypatch.setenv("OLLAMA_API_KEY", "super-secret")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "super-secret")
+    env = sandbox_env()
+    assert "super-secret" not in env.values()
+    assert env["PATH"] == ""            # nothing inherited from the parent
+
+
+def test_sandbox_env_passes_systemroot_only_on_windows(monkeypatch):
+    from nyx.security import sandbox
+
+    monkeypatch.setenv("SYSTEMROOT", r"C:\\Windows")
+    monkeypatch.setattr(sandbox.sys, "platform", "win32")
+    assert sandbox.sandbox_env()["SYSTEMROOT"] == r"C:\\Windows"
+    monkeypatch.setattr(sandbox.sys, "platform", "linux")
+    assert "SYSTEMROOT" not in sandbox.sandbox_env()

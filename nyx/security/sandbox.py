@@ -8,6 +8,7 @@ interface stays the same.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,21 @@ class SandboxResult:
     stdout: str
     stderr: str
     timed_out: bool = False
+
+
+def sandbox_env() -> dict[str, str]:
+    """The minimal environment the sandboxed process receives.
+
+    Nothing is inherited from the parent (no API keys, tokens or PATH). The one
+    exception is Windows: CPython cannot initialise its OS random-number generator
+    -- and dies with "failed to get random numbers" -- unless ``SYSTEMROOT`` is set.
+    That value is a public OS directory, not a secret, so passing it keeps the
+    sandbox scrubbed while letting the interpreter start.
+    """
+    env = {"PATH": "", "PYTHONHASHSEED": "0"}
+    if sys.platform == "win32":
+        env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", r"C:\Windows")
+    return env
 
 
 def run_sandboxed(
@@ -49,7 +65,7 @@ def run_sandboxed(
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                env={"PATH": "", "PYTHONHASHSEED": "0"},
+                env=sandbox_env(),
             )
         except subprocess.TimeoutExpired as exc:
             return SandboxResult(
